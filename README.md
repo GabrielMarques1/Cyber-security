@@ -157,6 +157,7 @@ git clone https://github.com/GabrielMarques1/Cyber-security.git
 ## 📌 Referências de Estudo
 
 - 🎓 [Hacking Club](https://app.hackingclub.com/) — Plataforma de treinamento ofensivo BR
+- 🎓 [HackTheBox](https://academy.hackthebox.com/app/dashboard/) — Plataforma de treinamento ofensivo 
 - 📖 [OWASP WSTG](https://owasp.org/www-project-web-security-testing-guide/) — Guia de testes de segurança web
 - 🔧 [Penelope Shell Handler](https://github.com/brightio/penelope) — Handler avançado de reverse shells
 - 📡 [NotebookLM](https://notebooklm.google.com/) — IA para estudo e resumo de conteúdos
