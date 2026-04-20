@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "README.md",
+                "file": "Payloads - Web Hacking.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "README"
+              "title": "Payloads - Web Hacking"
             }
           }
         ]
@@ -182,16 +182,18 @@
   },
   "active": "6c266daa23ac91c4",
   "lastOpenFiles": [
+    "Essential Web Hacking.md",
+    "Linux Privilege Escalation.md",
+    "Payloads - Web Hacking.md",
+    "Kali linux & Arch e minhas anotações basicas.md",
+    "Process of Hacking.md",
+    "README.md",
+    "REDES -.md",
+    "plano de Estudos.md",
+    "Não confirmado 211620.crdownload",
+    "Cybersec -.md",
     "Writeup — Máquina Laravel-Time.md",
     "REDES - GERAL.canvas",
-    "REDES -.md",
-    "README.md",
-    "Process of Hacking.md",
-    "Payloads - Web Hacking.md",
-    "Linux Privilege Escalation.md",
-    "Kali linux & Arch e minhas anotações basicas.md",
-    "Essential Web Hacking.md",
-    "Cybersec -.md",
     "dump_completo_env.txt",
     "credentials.txt",
     "sqli_blind.py",
