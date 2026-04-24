@@ -170,6 +170,7 @@ O problema está no **front-end (JavaScript do cliente)**, não no servidor. O i
 5. **Enumerar tabelas** — Via `information_schema.tables`
 6. **Enumerar colunas** — Via `information_schema.columns`
 7. **Extrair dados** — `UNION SELECT username, password FROM users`
+8. https://dencode.com/string/unicode-escape site para codificar as payloads
 
 #### information_schema
 Banco de **metadados** padrão que guarda os nomes de **todas** as tabelas e colunas do sistema. É a chave para descobrir a estrutura do banco.
