@@ -575,54 +575,132 @@ GraphQL permite que você **descubra todo o schema** (tipos, queries, mutations)
 
 ### 🔓 OAuth / SSO — Ataques em Autenticação Terceirizada
 
-> **O que é:** OAuth2 é o protocolo que permite "Login com Google/GitHub/Facebook". A aplicação delega a autenticação para um provedor externo. Se o fluxo é implementado errado, o atacante pode roubar tokens, sequestrar contas ou fazer login como qualquer usuário.
+> **O que é:** OAuth2 é o protocolo que permite "Login com Google/GitHub/Facebook". Em vez de a aplicação gerenciar senhas, ela delega a autenticação para um **provedor externo** (Google, GitHub, etc.). Se o fluxo é implementado errado, o atacante pode roubar tokens, sequestrar contas ou fazer login como qualquer usuário.
 
-**Como funciona o fluxo OAuth2 (simplificado):**
+**Diferença rápida OAuth vs SSO:**
+- **OAuth2** — Protocolo de **autorização**. Permite que uma app acesse dados do usuário em outro serviço (ex: app X lê seus repos do GitHub). O "Login com Google" é um uso comum, mas tecnicamente é construído sobre OAuth2 + OpenID Connect.
+- **SSO (Single Sign-On)** — Conceito de **autenticação única**. Você loga uma vez e acessa vários serviços. OAuth2 é frequentemente a tecnologia por trás, mas SSO pode usar SAML, CAS, ou outros protocolos.
+
+**Os 4 papéis do OAuth2:**
+
+| Papel | Quem é | Exemplo |
+|---|---|---|
+| **Resource Owner** | O usuário (dono dos dados) | Você |
+| **Client** | A aplicação que quer acessar os dados | app.com |
+| **Authorization Server** | Quem autentica e emite tokens | accounts.google.com |
+| **Resource Server** | Quem tem os dados protegidos | api.google.com/userinfo |
+
+**Como funciona o fluxo OAuth2 — Authorization Code (o mais comum):**
+
 ```
-1. Usuário clica "Login com Google"
-2. App redireciona para Google com: redirect_uri=https://app.com/callback
-3. Usuário autentica no Google
-4. Google redireciona de volta para redirect_uri com um CODE
-5. App troca o CODE por um ACCESS TOKEN
-6. App usa o token para pegar dados do usuário
+USUÁRIO                    APP (client)              GOOGLE (auth server)
+   │                           │                           │
+   │  1. Clica "Login Google"  │                           │
+   │──────────────────────────►│                           │
+   │                           │  2. Redirect com:         │
+   │                           │     client_id=XXX         │
+   │                           │     redirect_uri=app.com  │
+   │                           │     scope=email           │
+   │                           │     state=RANDOM123       │
+   │◄──────────────────────────│──────────────────────────►│
+   │                           │                           │
+   │  3. Usuário autentica no Google e autoriza            │
+   │──────────────────────────────────────────────────────►│
+   │                           │                           │
+   │  4. Google redireciona de volta:                      │
+   │     app.com/callback?code=ABC123&state=RANDOM123      │
+   │◄──────────────────────────────────────────────────────│
+   │                           │                           │
+   │                           │  5. App envia code ao     │
+   │                           │     Google (server-side)  │
+   │                           │     e recebe ACCESS TOKEN │
+   │                           │──────────────────────────►│
+   │                           │◄──────────────────────────│
+   │                           │                           │
+   │                           │  6. App usa o token para  │
+   │  7. Usuário logado!       │     buscar dados (email)  │
+   │◄──────────────────────────│                           │
 ```
 
-**Vetores de ataque:**
+**Parâmetros importantes (o que cada um faz):**
 
-| Ataque | O que explorar |
-|---|---|
-| **redirect_uri manipulation** | Se a aplicação não valida estritamente a `redirect_uri`, o atacante muda para `https://evil.com/callback` e rouba o code/token quando a vítima autentica |
-| **CSRF no callback** | Se o callback não verifica o parâmetro `state`, o atacante pode vincular sua própria conta OAuth à sessão da vítima |
-| **Token leaking via Referer** | Após o redirect, se a página do callback tem links externos, o token pode vazar no header `Referer` |
-| **Open Redirect + OAuth** | Combinar um Open Redirect da aplicação com o fluxo OAuth para redirecionar o token para o atacante |
-| **Scope abuse** | Pedir permissões além do necessário (ex: `scope=email+admin`) ou manipular scopes no request |
+| Parâmetro | Função | Se falta ou é fraco... |
+|---|---|---|
+| `client_id` | Identifica a aplicação | Não é secreto — pode ser público |
+| `redirect_uri` | Para onde o Google envia o code/token | Se não é validado → **roubo de token** |
+| `state` | Token anti-CSRF aleatório | Se falta → **CSRF no callback** (account takeover) |
+| `scope` | Que permissões a app pede | Se manipulável → **acesso além do esperado** |
+| `code` | Código temporário trocado pelo token | Se interceptado → atacante pega o token |
+| `response_type` | `code` (seguro) ou `token` (menos seguro) | `token` no fragment da URL é mais fácil de vazar |
 
-**Testando redirect_uri:**
+**Vetores de ataque detalhados:**
+
+**1. redirect_uri manipulation (mais comum)**
+
+O `redirect_uri` diz pro Google: "depois que o usuário autenticar, redirecione para essa URL com o code". Se a aplicação não valida estritamente esse parâmetro, o atacante troca para uma URL que ele controla:
+
 ```
-# Tentar subdomínios
+URL legítima:
+https://google.com/auth?client_id=APP&redirect_uri=https://app.com/callback&scope=email
+
+URL manipulada:
+https://google.com/auth?client_id=APP&redirect_uri=https://evil.com/steal&scope=email
+→ O code vai para evil.com em vez de app.com!
+```
+
+Variações de bypass quando a app tenta validar:
+```
+# App valida só o domínio base
+redirect_uri=https://app.com.evil.com/callback
+
+# App valida com startswith
+redirect_uri=https://app.com/callback/../../../evil.com
+
+# App aceita subdomínios
 redirect_uri=https://evil.app.com/callback
 
-# Tentar path traversal
-redirect_uri=https://app.com/callback/../../../evil
-
-# Tentar URL encoding
+# Encoding
 redirect_uri=https://app.com%40evil.com/callback
 
-# Tentar fragmento
+# Fragmento
 redirect_uri=https://app.com/callback#@evil.com
+
+# URL com porta
+redirect_uri=https://app.com:8443@evil.com/callback
 ```
 
-**Testando CSRF no callback:**
+**2. CSRF no callback (state ausente)**
+
+O parâmetro `state` é um valor aleatório que a app gera antes de redirecionar pro Google e confere quando o callback volta. Se não existe ou não é validado, o ataque funciona assim:
+
 ```
-# Se o parâmetro 'state' não existe ou não é validado:
-1. Atacante inicia fluxo OAuth com SUA conta
-2. Intercepta o callback ANTES de usá-lo
-3. Envia o link do callback para a vítima
-4. Vítima clica → conta do atacante é vinculada à sessão da vítima
-→ Atacante agora pode logar na conta da vítima via OAuth
+1. Atacante inicia "Login com Google" com a conta DELE
+2. Google autentica → gera callback: app.com/callback?code=ATACANTE_CODE
+3. Atacante NÃO usa esse link. Intercepta e guarda.
+4. Atacante envia esse link para a VÍTIMA (phishing, chat, etc.)
+5. Vítima clica → app.com recebe o code do ATACANTE
+6. A app vincula a conta OAuth do ATACANTE à sessão da VÍTIMA
+→ Resultado: Atacante faz "Login com Google" e entra na conta da vítima
 ```
 
-> **Em hacking:** OAuth é um dos vetores mais lucrativos em Bug Bounty porque qualquer falha leva a **account takeover**. Sempre que encontrar "Login com X", intercepte o fluxo no Burp, observe os parâmetros `redirect_uri`, `state`, `code` e `token`. Manipule cada um.
+**3. Token leaking via Referer**
+
+Se o fluxo usa `response_type=token` (implicit flow), o token vai direto na URL:
+```
+app.com/callback#access_token=TOKEN_AQUI
+```
+Se a página do callback tem imagens, scripts ou links para sites externos, o browser envia o header `Referer` com a URL completa — incluindo o token. O site externo recebe o token de graça.
+
+**4. Open Redirect + OAuth (combo attack)**
+
+Se a app tem um Open Redirect em qualquer endpoint (ex: `app.com/redirect?url=evil.com`), o atacante pode usar esse endpoint como `redirect_uri`:
+```
+redirect_uri=https://app.com/redirect?url=https://evil.com/steal
+→ Google valida: "sim, é app.com" ✅
+→ App redireciona para evil.com com o code/token ❌
+```
+
+> **Em hacking:** OAuth é um dos vetores mais lucrativos em Bug Bounty porque qualquer falha leva a **account takeover**. Sempre que encontrar "Login com X", intercepte o fluxo inteiro no Burp Suite. Observe cada parâmetro: `redirect_uri`, `state`, `code`, `token`, `scope`. Manipule cada um separadamente. Teste especialmente se o `state` existe e se o `redirect_uri` aceita variações.
 
 ---
 
