@@ -320,12 +320,12 @@ Fluxo completo:
 
 **PHP Wrappers** — O PHP tem "wrappers" que permitem acessar diferentes fluxos de dados pela mesma função `include()`. Quando a aplicação faz `include($_GET['file'])`, você pode substituir o path de arquivo por um wrapper:
 
-| Wrapper | O que faz | Quando usar |
-|---|---|---|
+| Wrapper        | O que faz                                                  | Quando usar                                                               |
+| -------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
 | `php://filter` | Lê o código-fonte de arquivos PHP em base64 (sem executar) | Para ler o código da aplicação e encontrar credenciais, lógica de negócio |
-| `php://input` | Lê o corpo da requisição POST como arquivo | Para enviar código PHP via POST e executar |
-| `data://` | Transforma uma string em "arquivo" inline | Para executar código sem depender de arquivo no servidor |
-| `expect://` | Executa comando do sistema diretamente | Raro — precisa da extensão `expect` instalada |
+| `php://input`  | Lê o corpo da requisição POST como arquivo                 | Para enviar código PHP via POST e executar                                |
+| `data://`      | Transforma uma string em "arquivo" inline                  | Para executar código sem depender de arquivo no servidor                  |
+| `expect://`    | Executa comando do sistema diretamente                     | Raro — precisa da extensão `expect` instalada                             |
 
 Exemplos:
 ```
@@ -412,6 +412,54 @@ GET /api/user/13/profile  → Perfil de OUTRA pessoa? Se funcionar → IDOR! �
 - Métodos HTTP diferentes (`GET` funciona, mas `PUT /api/users/1` com `{"role":"admin"}` também?)
 
 > **Ferramenta útil:** wfuzz/ffuf para enumerar IDs automaticamente com range.
+
+---
+
+### ⚡ Race Condition (TOCTOU)
+
+> **O que é:** Quando a aplicação verifica uma condição e executa uma ação em momentos separados, e o atacante consegue **modificar o estado entre a verificação e a execução**. O nome técnico é TOCTOU — Time of Check to Time of Use.
+
+**Analogia:** Imagine um porteiro que olha sua identidade (check), guarda ela na gaveta, e 3 segundos depois abre a porta (use). Nesse intervalo de 3 segundos, alguém troca a identidade na gaveta. O porteiro abre a porta confiando numa verificação que já não é mais válida.
+
+**Onde aparece na prática:**
+
+| Cenário | O que acontece |
+|---|---|
+| Cupom de desconto | Aplicação verifica se o cupom já foi usado, mas demora para marcar como usado → enviar 10 requests simultâneos = 10 descontos |
+| Transferência bancária | Saldo é verificado, mas o débito demora → enviar 5 transferências ao mesmo tempo com saldo para apenas 1 |
+| Votação / Like | Verifica se já votou → enviar vários votos antes do registro |
+| Follow/Unfollow | Seguir alguém 100 vezes em 1 segundo para inflar contador |
+| Resgate de gift card | Verificar saldo → usar → mas se enviar 2x ao mesmo tempo, resgata 2x o valor |
+
+**Como funciona tecnicamente:**
+
+A aplicação faz algo assim:
+```
+1. if (cupom_ja_usado == false)     ← VERIFICAÇÃO
+2.     aplicar_desconto()            ← AÇÃO
+3.     marcar_cupom_como_usado()     ← ATUALIZAÇÃO
+```
+Entre o passo 1 e o passo 3, existe uma janela de tempo. Se você enviar múltiplos requests nessa janela, todos passam pela verificação antes que qualquer um atualize o estado.
+
+**Como explorar:**
+
+1. **Identificar a ação vulnerável** — operações que verificam e modificam estado (pagamentos, cupons, votos, transferências)
+2. **Enviar requests simultâneos** — Usar Burp Turbo Intruder, race-the-web, ou scripts Python com threading
+3. **Observar se a ação foi executada mais de uma vez** — saldo negativo, cupom aplicado 2x, múltiplos votos
+
+```python
+# Exemplo simples com threading
+import threading, requests
+
+def usar_cupom():
+    requests.post('http://alvo.com/aplicar-cupom', data={'code': 'DESC50'})
+
+threads = [threading.Thread(target=usar_cupom) for _ in range(20)]
+for t in threads: t.start()
+for t in threads: t.join()
+```
+
+> **Em hacking:** Race Condition aparece muito em CTFs e Bug Bounty. Sempre que uma ação envolve "verificar algo → fazer algo → atualizar algo", teste com requests simultâneos. O Burp Suite com a extensão **Turbo Intruder** é a ferramenta ideal — permite enviar dezenas de requests em paralelo com timing preciso.
 
 ---
 
@@ -522,6 +570,59 @@ GraphQL permite que você **descubra todo o schema** (tipos, queries, mutations)
 - `alg: none` — Remove a verificação de assinatura
 - **Brute force** do secret com hashcat/john
 - **Key confusion** — Trocar RS256 por HS256 e assinar com a chave pública
+
+---
+
+### 🔓 OAuth / SSO — Ataques em Autenticação Terceirizada
+
+> **O que é:** OAuth2 é o protocolo que permite "Login com Google/GitHub/Facebook". A aplicação delega a autenticação para um provedor externo. Se o fluxo é implementado errado, o atacante pode roubar tokens, sequestrar contas ou fazer login como qualquer usuário.
+
+**Como funciona o fluxo OAuth2 (simplificado):**
+```
+1. Usuário clica "Login com Google"
+2. App redireciona para Google com: redirect_uri=https://app.com/callback
+3. Usuário autentica no Google
+4. Google redireciona de volta para redirect_uri com um CODE
+5. App troca o CODE por um ACCESS TOKEN
+6. App usa o token para pegar dados do usuário
+```
+
+**Vetores de ataque:**
+
+| Ataque | O que explorar |
+|---|---|
+| **redirect_uri manipulation** | Se a aplicação não valida estritamente a `redirect_uri`, o atacante muda para `https://evil.com/callback` e rouba o code/token quando a vítima autentica |
+| **CSRF no callback** | Se o callback não verifica o parâmetro `state`, o atacante pode vincular sua própria conta OAuth à sessão da vítima |
+| **Token leaking via Referer** | Após o redirect, se a página do callback tem links externos, o token pode vazar no header `Referer` |
+| **Open Redirect + OAuth** | Combinar um Open Redirect da aplicação com o fluxo OAuth para redirecionar o token para o atacante |
+| **Scope abuse** | Pedir permissões além do necessário (ex: `scope=email+admin`) ou manipular scopes no request |
+
+**Testando redirect_uri:**
+```
+# Tentar subdomínios
+redirect_uri=https://evil.app.com/callback
+
+# Tentar path traversal
+redirect_uri=https://app.com/callback/../../../evil
+
+# Tentar URL encoding
+redirect_uri=https://app.com%40evil.com/callback
+
+# Tentar fragmento
+redirect_uri=https://app.com/callback#@evil.com
+```
+
+**Testando CSRF no callback:**
+```
+# Se o parâmetro 'state' não existe ou não é validado:
+1. Atacante inicia fluxo OAuth com SUA conta
+2. Intercepta o callback ANTES de usá-lo
+3. Envia o link do callback para a vítima
+4. Vítima clica → conta do atacante é vinculada à sessão da vítima
+→ Atacante agora pode logar na conta da vítima via OAuth
+```
+
+> **Em hacking:** OAuth é um dos vetores mais lucrativos em Bug Bounty porque qualquer falha leva a **account takeover**. Sempre que encontrar "Login com X", intercepte o fluxo no Burp, observe os parâmetros `redirect_uri`, `state`, `code` e `token`. Manipule cada um.
 
 ---
 
