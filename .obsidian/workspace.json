@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Essential Web Hacking.md",
+                "file": "Linux Privilege Escalation.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Essential Web Hacking"
+              "title": "Linux Privilege Escalation"
             }
           }
         ]
@@ -182,16 +182,16 @@
   },
   "active": "6c266daa23ac91c4",
   "lastOpenFiles": [
-    "Cybersec -.md",
-    "Payloads - Web Hacking.md",
     "Essential Web Hacking.md",
     "Kali linux & Arch e minhas anotações basicas.md",
-    "plano de Estudos.md",
-    "REDES -.md",
+    "Process of Hacking.md",
+    "Payloads - Web Hacking.md",
     "Linux Privilege Escalation.md",
+    "plano de Estudos.md",
+    "Cybersec -.md",
+    "REDES -.md",
     "Sem título 1",
     "Sem título",
-    "Process of Hacking.md",
     "README.md",
     "Writeup — Máquina Laravel-Time.md",
     "Writeups/Writeup — Máquina Laravel-Time.md",
