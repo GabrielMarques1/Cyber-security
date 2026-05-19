@@ -1154,3 +1154,292 @@ sqlmap -u URL --tamper=space2comment,randomcase --random-agent --delay=1
 - **WAFs em cloud (Cloudflare, AWS WAF) podem ser bypassados encontrando o IP real** do servidor (via histórico DNS, subdomain scan, Censys/Shodan). Se você enviar a requisição diretamente para o IP do backend, o WAF é completamente irrelevante.
 
 > **Dica avançada:** Para Cloudflare especificamente, procure o IP real do servidor em registros DNS históricos (SecurityTrails, ViewDNS.info), em emails enviados pelo site (o header do email pode revelar o IP), ou em subdomínios que não estão protegidos pelo Cloudflare. Se achar o IP real, adicione ao `/etc/hosts` apontando o domínio para ele, e todas as requisições vão direto ao backend sem WAF.
+
+---
+
+### 🃏 Type Juggling — Comparação Frouxa em PHP
+
+> **O que é:** Uma falha que ocorre quando o PHP usa o operador `==` (comparação frouxa/loose) para comparar valores de tipos diferentes. O PHP converte automaticamente os tipos antes de comparar — e essa conversão pode ser explorada para bypassar autenticação e lógica de negócio.
+
+**A diferença fundamental:**
+
+| Operador | Nome | Comportamento |
+|---|---|---|
+| `==` | Loose comparison | Converte os tipos antes de comparar (perigoso!) |
+| `===` | Strict comparison | Compara valor E tipo — sem conversão (seguro) |
+
+**Por que isso é perigoso — as regras de coerção do PHP:**
+
+Quando os tipos são diferentes, o PHP aplica regras de conversão implícitas. As mais exploradas:
+
+| Comparação | Resultado | Por quê |
+|---|---|---|
+| `0 == "admin"` | `true` | String não-numérica → convertida para `0` |
+| `0 == ""` | `true` | String vazia → `0` |
+| `true == "qualquer_string"` | `true` | Qualquer string não-vazia → `true` |
+| `null == false` | `true` | null é falsy |
+| `"1" == "01"` | `true` | Ambas viram o número `1` |
+| `100 == "1e2"` | `true` | Notação científica → `100` |
+
+**Analogia:** Imagine um porteiro que compara seu nome com a lista de convidados, mas aceita apelidos. Se sua lista diz "Gabriel" e você fala "Gab" — ele acha que é igual. O PHP faz isso com tipos: ele "aceita o apelido" do valor.
+
+#### Magic Hashes — O ataque mais elegante
+
+Quando o PHP compara dois hashes com `==`, se ambos começam com `0e` seguido apenas de dígitos, o PHP trata os dois como `0` (notação científica) → `0 == 0` → `true`!
+
+```
+Input → MD5 Hash
+"240610708" → 0e462097431906509019562988736854  ← PHP trata como 0!
+"QNKCDZO"   → 0e830400451993494058024219903391  ← PHP trata como 0!
+
+Se o banco tem o hash de "240610708", enviar "QNKCDZO" passa na verificação!
+```
+
+**Como identificar vulnerabilidade:**
+- Aplicação PHP que faz login/verificação de token
+- Comparação de senha/hash via `==` (verificar no código, ou testar comportamento)
+- Campos que aceitam JSON → enviar `true` ou `0` em vez de string
+
+**Como explorar:**
+```
+# Bypass de autenticação — enviar 0 como "senha" (PHP < 8.0)
+Se o banco retorna uma hash como string não-numérica:
+  0 == "hash_qualquer"  →  true (em PHP < 8.0!)
+
+# Via JSON: enviar boolean true
+{"password": true}  →  "senha" == true  →  true
+
+# Via PHP array (quebra funções como strcmp)
+password[]=  →  strcmp(array, string) retorna NULL  →  NULL == 0  →  true
+```
+
+> **Em hacking:** Type Juggling aparece muito em CTFs com código PHP. Sempre que encontrar login, verificação de token ou comparação de hash em PHP, teste: envie `0`, `true` (via JSON), ou arrays. Em PHP 8.0+ o `0 == "string"` mudou para `false` — verifique a versão do PHP antes de testar.
+
+---
+
+### 🔤 Typo Juggling — Casos Específicos de Coerção
+
+> **O que é:** Subconjunto do Type Juggling focado em casos onde o PHP converte tipos por "erro de tipagem" (typo) — comportamentos menos óbvios da coerção, especialmente com strings que parecem numéricas, valores falsy e comparações com null/false.
+
+**Diferença para Type Juggling:** Enquanto o Type Juggling cobre o mecanismo geral, o Typo Juggling foca nos casos onde a conversão acontece por valores que se "parecem" com outro tipo mas não são — enganando tanto o desenvolvedor quanto a aplicação.
+
+**Os casos mais exploráveis:**
+
+| Comparação | Resultado | Contexto de ataque |
+|---|---|---|
+| `"0" == false` | `true` | Validação de token que retorna "0" |
+| `"0" == null` | `false` | (atenção: esse NÃO é true!) |
+| `"php" == 0` | `true` (PHP<8) | Senha hash armazenada como string |
+| `"1abc" == 1` | `true` | ID numérico comparado com string |
+| `" " == 0` | `true` | Espaço em branco vira 0 |
+| `"0.0" == "0"` | `false` | Mas `"0.0" == 0` é `true`! |
+
+**A armadilha do "0":** O string `"0"` é falsy em PHP (considera-se vazio/falso), então:
+```php
+if ($token == false) { ... }   // "0" passa aqui!
+if (empty($token))  { ... }   // "0" passa aqui também!
+if (!$token)        { ... }   // "0" passa aqui também!
+```
+Se um token legítimo for o string `"0"`, qualquer verificação com `==`, `empty()` ou `!` vai tratar como inválido — abrindo brechas na lógica.
+
+**Como explorar:**
+```
+# Enviar string "0" onde um token é esperado
+token=0
+token=0.0
+token= (espaço)
+
+# Se a lógica for: if ($input == $stored_value) { grant_access(); }
+# e $stored_value for qualquer string não-numérica:
+input=0   →  0 == "abc123"  →  true  (PHP < 8.0)
+```
+
+> **Em hacking:** Typo Juggling aparece quando a aplicação armazena tokens como strings geradas automaticamente. Teste especialmente com `0`, `"0"`, `false` e `null`. Revise se o código usa `==` vs `===` e `empty()` vs `isset()` — ambas as funções têm comportamentos diferentes com `"0"`.
+
+### 🌀 Type Confusion — O Conceito Base
+
+> **O que é:** Type Confusion (Confusão de Tipo) é uma classe de vulnerabilidades que ocorre quando um programa **recebe um valor de um tipo** mas o **processa como se fosse outro tipo**. A aplicação espera uma string, mas o atacante manda um objeto. Espera um número, mas recebe um array. Espera um booleano, mas recebe uma função. Quando não há verificação do tipo antes do uso, o comportamento pode ser completamente diferente do esperado — e explorado.
+
+**Por que isso acontece:**
+
+Linguagens como JavaScript, PHP e Python são **fracamente tipadas** — o tipo de uma variável não é fixo, pode mudar. Combinadas com frameworks web que convertem automaticamente o corpo das requisições (JSON → objeto JavaScript, query string → dicionário Python), cria-se um problema estrutural: **o servidor aceita qualquer forma que o dado venha** sem verificar se o tipo faz sentido para aquele contexto.
+
+**A raiz do problema — conversão automática de entrada:**
+
+```
+Requisição HTTP chega como texto plano:
+  POST /login
+  Content-Type: application/json
+  Body: {"username": "admin", "password": {"$ne": null}}
+                                            ↑
+                                   Isso é um OBJETO, não uma string!
+                                   O body parser converte automaticamente.
+```
+
+O body parser do framework transforma o JSON em um objeto nativo da linguagem sem perguntar "isso é o tipo esperado?". A aplicação recebe um objeto onde esperava uma string — e o que acontece a seguir depende de como a aplicação usa esse dado.
+
+**Os três cenários principais onde Type Confusion aparece:**
+
+| Cenário | Linguagem/Stack | O que o atacante injeta |
+|---|---|---|
+| **Loose comparison** | PHP | Tipos primitivos (`0`, `true`, arrays) que passam em `==` |
+| **ORM/Query Builder** | Node.js + MongoDB/Prisma | Objetos com operadores de query (`{"$ne": null}`) |
+| **Parsing diferencial** | Qualquer | Um valor que é interpretado diferente por dois sistemas |
+
+**A diferença entre Type Juggling e Type Confusion:**
+
+- **Type Juggling** (PHP) → A linguagem converte o tipo *automaticamente* durante uma comparação (`0 == "string"` → `true`). A falha é na *linguagem*.
+- **Type Confusion** (ORMs/frameworks) → O dado chega com o tipo *errado* e a aplicação não verifica antes de usá-lo. A falha é na *lógica da aplicação*.
+
+São problemas relacionados mas distintos: no Juggling o PHP converte; no Confusion o Node.js/Prisma/Mongoose aceita o objeto como estrutura de query válida.
+
+---
+
+### 🌀 Type Confusion Attack — Injeção de Tipo em ORMs e Filtros
+
+> **O que é:** Quando a aplicação passa input do usuário **diretamente** para um ORM ou query builder sem validar o tipo, o atacante pode enviar um **objeto** (com operadores de query) em vez de um valor simples, alterando completamente a lógica da consulta.
+
+**Analogia:** Imagine pedir para um barman uma caipirinha "com limão". Você aporta um limão. Mas se o barman aceitasse qualquer objeto no lugar do limão, você poderia passar um "kit de coquetéis inteiro" e ele usaria tudo — incluindo coisas que você não deveria controlar.
+
+**O problema central:**
+```
+Desenvolvedor espera receber:    { "username": "admin" }
+Atacante envia:                  { "username": { "$ne": null } }
+
+O ORM interpreta o objeto como um OPERADOR de query, não um valor!
+```
+
+#### Filter Bypass Genérico (aplicações Node.js/Express)
+
+Quando o body parser do Express converte a requisição em objeto JavaScript, qualquer JSON enviado é aceito como estrutura de query:
+
+```
+# Requisição legítima:
+POST /login  →  {"username": "admin", "password": "senha123"}
+
+# Requisição maliciosa:
+POST /login  →  {"username": {"$ne": null}, "password": {"$ne": null}}
+
+# O banco retorna o primeiro usuário que NÃO tem username null
+# → Bypass de autenticação sem conhecer nenhuma credencial
+```
+
+
+Via URL (quando o body parser usa `extended: true`):
+```
+username[$ne]=nada&password[$ne]=nada
+username[$gt]=&password[$gt]=
+```
+
+#### Type Confusion — ORM MongoDB/Mongoose
+
+**Por que o Mongoose não protege automaticamente:**
+O Mongoose valida tipos definidos no Schema, mas:
+- Se o campo é `Schema.Types.Mixed` → aceita qualquer estrutura
+- Se o campo é `String` mas o atacante envia um objeto com operador → Mongoose pode deixar passar ou o objeto é processado antes do cast
+- A validação acontece no campo, mas o operador muda a **lógica da query**, não o valor
+
+**Cenário de ataque (endpoint de reset de senha):**
+```javascript
+// Código vulnerável:
+const user = await User.findOne({
+    resetToken: req.body.token  // Esperava string, recebe objeto!
+});
+
+// Atacante envia: {"token": {"$ne": ""}}
+// Query vira: db.users.findOne({ resetToken: { $ne: "" } })
+// Retorna o primeiro usuário com qualquer token → reset sem saber o token!
+```
+
+**Operadores úteis em ataques:**
+| Operador | Efeito no ataque |
+|---|---|
+| `{"$ne": null}` | Qualquer valor não-nulo → bypass de autenticação |
+| `{"$ne": ""}` | Qualquer valor não-vazio → mesma coisa |
+| `{"$gt": ""}` | Qualquer string → retorna todos |
+| `{"$regex": "^a"}` | Extrai dados por prefixo (extração blind) |
+| `{"$exists": true}` | Qualquer campo que existe → bypass |
+
+#### Type Confusion — ORM Prisma
+
+O Prisma usa um sistema de filtros baseado em objetos para `where`:
+```typescript
+prisma.user.findFirst({ where: { email: "admin@site.com" } })
+```
+
+Se o input do usuário vai direto para o `where`:
+```javascript
+// Código vulnerável:
+const user = await prisma.user.findFirst({
+    where: { resetToken: req.body.token }  // string esperada, objeto recebido!
+});
+
+// Atacante envia: {"token": {"not": ""}}
+// Prisma interpreta: WHERE resetToken != ''
+// Retorna o primeiro usuário com token ≠ vazio → bypass!
+```
+
+**Operadores do Prisma que podem ser injetados:**
+| Operador injetado | Efeito |
+|---|---|
+| `{"not": ""}` | Campo diferente de vazio → retorna qualquer registro |
+| `{"contains": ""}` | Campo contém string vazia → retorna tudo |
+| `{"startsWith": "a"}` | Extração blind por prefixo |
+| `{"endsWith": "@"}` | Extração blind por sufixo |
+| `{"gt": ""}` | Maior que vazio → retorna todos |
+
+**Como identificar:**
+1. Aplicação Node.js/Express com MongoDB ou Prisma
+2. Endpoints de login, reset de senha, verificação de token
+3. Tentar enviar `{"campo": {"$ne": null}}` (Mongo) ou `{"campo": {"not": ""}}` (Prisma) onde a aplicação espera string
+
+> **Em hacking:** Esse ataque é o que o Hacking Club chama de "Type Confusion Attack". O framework aceita objetos como valores de campo, e objetos contendo operadores alteram a lógica da query. Sempre que encontrar API Node.js com MongoDB ou Prisma, intercepte requisições de autenticação no Burp Suite e troque o valor do campo de autenticação por um objeto com operador. Ligue o `Content-Type: application/json` para garantir que o body parser aceite o objeto.
+
+---
+
+### 🍪 Biscuit — Token de Autorização Moderno
+
+> **O que é:** Biscuit é um formato de token de autorização moderno, alternativa ao JWT, baseado em **Ed25519** (criptografia de chave pública) e **Datalog** (linguagem lógica). Diferente do JWT, foi projetado para **delegação offline** — o portador do token pode criar versões mais restritas do token sem contatar o servidor original.
+
+**Diferença JWT vs Biscuit:**
+
+| Característica | JWT | Biscuit |
+|---|---|---|
+| **Algoritmos** | Flexível (pode usar `alg: none`, RS256, HS256...) | Fixo: Ed25519 — sem "algorithm confusion" |
+| **Claims** | Pares chave-valor estáticos | Regras Datalog dinâmicas |
+| **Delegação** | Não suporta nativamente | Nativo — atenuação offline |
+| **Vulnerabilidades comuns** | `alg: none`, key confusion, weak secret | Má implementação de policies, atenuação incorreta |
+
+**Como funciona:**
+```
+Token Biscuit = Bloco Autoridade + N Blocos de Atenuação + Assinatura
+
+Bloco Autoridade (emitido pelo servidor):
+  user("gabriel");
+  role("admin");
+
+Bloco de Atenuação (criado pelo cliente para delegar permissões menores):
+  check if time($t), $t < 2024-01-01T00:00:00Z;  ← expira em data específica
+  check if role("user");  ← restringe para role menor
+```
+
+**Onde aparece em CTFs/hacking:**
+- Aplicações que usam Biscuit como sistema de autenticação
+- Manipulação das regras Datalog dentro do token
+- Atenuação maliciosa para ganhar permissões
+- Extração do bloco autoridade para análise
+
+**Vetores de ataque:**
+- **Policy bypass:** Se as políticas Datalog não cobrem todos os casos, pode existir um estado não coberto que é aceito
+- **Atenuação maliciosa:** Adicionar blocos que mudam a lógica da autorização
+- **Reutilização de token:** Token sem expiração definida
+- **Exposição do token:** Biscuit em URL, logs ou headers inseguros
+
+**Ferramentas:**
+```bash
+# biscuit-cli — analisar e criar tokens Biscuit
+biscuit inspect TOKEN_AQUI    # Ver o conteúdo do token
+biscuit attenuate TOKEN_AQUI  # Criar versão atenuada
+```
+
+> **Em hacking:** No contexto do Hacking Club, "Biscuit" refere-se a desafios que usam esse formato de token. Se encontrar um Biscuit token, inspecione os blocos Datalog — as permissões são expressas em lógica, e brechas nas regras podem permitir acesso não autorizado. Lembre-se: ao contrário do JWT, o Biscuit **não tem o problema do `alg: none`** — a criptografia é segura por padrão. O foco deve ser na **lógica das policies**, não na criptografia.
