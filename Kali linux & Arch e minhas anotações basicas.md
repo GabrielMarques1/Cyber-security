@@ -1,4 +1,4 @@
-# 🐧 Linux — Comandos Essenciais
+	# 🐧 Linux — Comandos Essenciais
 
 > [!Fonte de onde pego os ensinamentos e dicas]
 > https://notebooklm.google.com/notebook/556e39f1-065f-4755-b85c-d3ae7090b385
