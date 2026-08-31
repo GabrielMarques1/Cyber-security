@@ -23,18 +23,26 @@
 
 ```
 📂 Cyber-security/
+├── 📄 Cybersec -.md                  → Índice central do vault (home do Obsidian)
 ├── 📄 Process of Hacking.md          → Metodologia completa de Bug Bounty
 ├── 📄 Essential Web Hacking.md       → Teoria das vulnerabilidades web
-├── 📄 Payloads - Web Hacking.md      → Payloads prontos (XSS, SQLi, SSRF, WAF bypass...)
+├── 📄 Payloads - Web Hacking.md      → Payloads prontos (XSS, SQLi, SSRF...)
+├── 📄 WAF Bypass.md                  → Guia dedicado a bypass de Web Application Firewalls
 ├── 📄 Linux Privilege Escalation.md  → Guia completo de PrivEsc em Linux
 ├── 📄 Kali linux & Arch - Anotações  → Comandos essenciais de Linux para hacking
 ├── 📄 REDES -.md                     → Fundamentos de redes (TCP/IP, OSI, DNS, HTTP)
+├── 📄 plano de Estudos.md            → Trilha de estudos CWES + Hacking Club + PortSwigger
 └── 🗺️  REDES - GERAL.canvas          → Diagrama visual de redes (Obsidian)
 ```
 
 ---
 
 ## 📚 Conteúdo
+
+### 🗂️ [Cybersec - (Índice Central)](./Cybersec%20-.md)
+Home page do vault no Obsidian — índice central com links para todos os arquivos de estudo e referência rápida.
+
+---
 
 ### 🎯 [Process of Hacking](./Process%20of%20Hacking.md)
 Metodologia estruturada para Bug Bounty e pentest:
@@ -60,12 +68,24 @@ Teoria aprofundada das principais vulnerabilidades web:
 ### 💣 [Payloads - Web Hacking](./Payloads%20-%20Web%20Hacking.md)
 Coleção de payloads prontos para uso, incluindo:
 
-- **WAF Bypass** — Técnicas de evasão de firewalls de aplicação
 - **XSS** — Reflected, Stored, DOM-based
 - **SQL Injection** — Union-based, Blind, Error-based
 - **SSRF** — Bypass de filtros e pivoting interno
 - **Command Injection** — Linux/Windows
 - **Linux PrivEsc Payloads** — One-liners de escalação de privilégios
+
+---
+
+### 🛡️ [WAF Bypass](./WAF%20Bypass.md)
+Guia dedicado a contornar Web Application Firewalls — separado dos Payloads por volume e profundidade:
+
+```
+Cloudflare  →  AWS WAF  →  Akamai  →  Imperva  →  ModSecurity
+```
+
+- **Mentalidade:** entender como o WAF interpreta vs. como a aplicação interpreta
+- **Técnicas:** encoding, fragmentação, case variation, HTTP smuggling
+- **Alvos:** Cloudflare, AWS WAF, Akamai Kona, Imperva/Incapsula, Sucuri, F5 BIG-IP ASM
 
 ---
 
@@ -97,6 +117,17 @@ Referência rápida cobrindo:
 Fundamentos de redes aplicados à segurança:
 
 `Modelo OSI` • `TCP/IP` • `DNS` • `HTTP/HTTPS` • `ARP` • `Sub-redes`
+
+---
+
+### 📅 [Plano de Estudos](./plano%20de%20Estudos.md)
+Trilha de estudos estruturada com as três plataformas principais:
+
+| Plataforma | Foco |
+|------------|------|
+| **CWES (HTB Academy)** | Trilha de certificação — conteúdo estruturado |
+| **Hacking Club** | Nível avançado — máquinas e prática ofensiva |
+| **PortSwigger Academy** | Labs cirúrgicos por vulnerabilidade — teoria web de referência |
 
 ---
 
