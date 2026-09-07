@@ -9,196 +9,213 @@
 <img src="https://img.shields.io/badge/Bug%20Bounty-FF6B6B?style=for-the-badge&logo=hackerone&logoColor=white"/>
 <img src="https://img.shields.io/badge/Pentest-00FF41?style=for-the-badge&logo=metasploit&logoColor=black"/>
 <img src="https://img.shields.io/badge/CTF-FFD700?style=for-the-badge&logo=hackthebox&logoColor=black"/>
+<img src="https://img.shields.io/badge/OWASP-API%20%26%20Web-blue?style=for-the-badge&logo=owasp&logoColor=white"/>
 
 <br/><br/>
 
-> **Repositório de anotações, payloads e metodologias de segurança ofensiva.**  
-> Estudo contínuo de Bug Bounty, Web Hacking, Linux PrivEsc e mais.
+> **Base de Conhecimento, Metodologias e Arsenal de Segurança Ofensiva Ética.**  
+> Estudos contínuos de Web Hacking, API Security, Linux PrivEsc, Evasão de WAF e Metodologias PTES/MITRE ATT&CK.  
+> Sincronizado com o portfólio oficial em: **[gabrielsec.live](https://www.gabrielsec.live)**
 
 </div>
 
 ---
 
-## 📁 Estrutura do Repositório
+## 📁 Estrutura do Vault
 
 ```
 📂 Cyber-security/
-├── 📄 Cybersec -.md                  → Índice central do vault (home do Obsidian)
-├── 📄 Process of Hacking.md          → Metodologia completa de Bug Bounty
-├── 📄 Essential Web Hacking.md       → Teoria das vulnerabilidades web
-├── 📄 Payloads - Web Hacking.md      → Payloads prontos (XSS, SQLi, SSRF...)
-├── 📄 WAF Bypass.md                  → Guia dedicado a bypass de Web Application Firewalls
-├── 📄 Linux Privilege Escalation.md  → Guia completo de PrivEsc em Linux
-├── 📄 Kali linux & Arch - Anotações  → Comandos essenciais de Linux para hacking
-├── 📄 REDES -.md                     → Fundamentos de redes (TCP/IP, OSI, DNS, HTTP)
-├── 📄 plano de Estudos.md            → Trilha de estudos CWES + Hacking Club + PortSwigger
-└── 🗺️  REDES - GERAL.canvas          → Diagrama visual de redes (Obsidian)
+├── 📄 Cybersec -.md                                 → Índice central do vault (Home no Obsidian)
+├── 📄 Process of Hacking.md                         → Metodologia estruturada de Pentest e Bug Bounty
+├── 📄 Essential Web Hacking.md                      → Arquitetura e teoria profunda de vulnerabilidades web
+├── 📄 OWASP API Top 10.md                           → Análise analítica e exploração da OWASP API Security Top 10
+├── 📄 Payloads - Web Hacking.md                     → Dicionário tático de payloads práticos e variações
+├── 📄 WAF Bypass.md                                 → Técnicas avançadas de evasão de Web Application Firewalls
+├── 📄 Linux Privilege Escalation.md                 → Guia exaustivo de escalação de privilégios em GNU/Linux
+├── 📄 Kali linux & Arch e minhas anotações basicas.md→ Comandos de terminal, dotfiles, redes e pivoting
+├── 📄 REDES -.md                                    → Fundamentos de redes (TCP/IP, OSI, DNS, HTTP/S, ARP)
+├── 📄 plano de Estudos.md                           → Trilha de capacitação técnica (HTB, Hacking Club, PortSwigger)
+└── 🗺️ REDES - GERAL.canvas                         → Diagrama conceitual visual de topologia de redes
 ```
 
 ---
 
-## 📚 Conteúdo
+## 📚 Módulos de Conhecimento
 
 ### 🗂️ [Cybersec - (Índice Central)](./Cybersec%20-.md)
-Home page do vault no Obsidian — índice central com links para todos os arquivos de estudo e referência rápida.
+Ponto de partida do vault no Obsidian. Centraliza o mapeamento relacional entre notas através de links bidirecionais (`[[...]]`), servindo como MOC (*Map of Content*).
 
 ---
 
 ### 🎯 [Process of Hacking](./Process%20of%20Hacking.md)
-Metodologia estruturada para Bug Bounty e pentest:
+Framework operacional e sistemático alinhado às fases do **PTES** (*Penetration Testing Execution Standard*):
 
-| Fase | Descrição |
-|------|-----------|
-| **1. Recon** | Subdomain discovery, content discovery, application mapping |
-| **2. Análise** | Vulnerability assessment com base no OWASP WSTG |
-| **3. PoC** | Construção de prova de conceito reproduzível |
-| **4. Report** | Template profissional de relatório de vulnerabilidade |
-
-**Ferramentas cobertas:** `subfinder`, `httpx`, `gau`, `katana`, `ffuf`, `kxss`, `SecretFinder`
+| Fase | Foco Operacional | Metodologia / Padrão |
+|------|------------------|----------------------|
+| **1. Intelligence Gathering** | Reconhecimento passivo e ativo, OSINT, ASN, DNS | Subfinder, Httpx, Amass, Shodan |
+| **2. Threat Modeling** | Mapeamento de endpoints, superfícies de ataque e ativos | OWASP WSTG, Katana, Gau |
+| **3. Vulnerability Analysis** | Identificação e priorização de vetores de entrada | Ffuf, Burp Suite, Nuclei |
+| **4. Exploitation** | Prova de Conceito (PoC) e exploração controlada | Payloads dedicados, scripts custom |
+| **5. Post-Exploitation & Reporting** | Documentação, impacto de negócio e remediação | CVSS v3.1, Relatórios executivos |
 
 ---
 
 ### 🌐 [Essential Web Hacking](./Essential%20Web%20Hacking.md)
-Teoria aprofundada das principais vulnerabilidades web:
+Abordagem teórica aprofundada, funcionamento sob a ótica de arquitetura e mitigação de vulnerabilidades web:
 
-`SQLi` • `XSS` • `CSRF` • `SSRF` • `IDOR` • `LFI/RFI` • `Command Injection` • `Auth Bypass` • `Open Redirect` • `XXE`
+- **Injeções de Código:** SQL Injection (UNION-based, Time-Based Blind, Error-based, WebShell via `INTO OUTFILE`), Command Injection (quebra de comandos e sanitização de shell).
+- **Controle de Acesso & Lógica:** IDOR, CSRF (tokens e atributos `SameSite`), Autenticação e Autorização.
+- **Inclusão de Arquivos & SSRF:** Local File Inclusion (LFI com wrappers PHP), Remote File Inclusion (RFI), Server-Side Request Forgery (SSRF interno).
+- **Client-Side:** Cross-Site Scripting (XSS Reflected, Stored e DOM-based, impacto de CSP e cookies `HttpOnly`).
+- **Pós-Exploração Web:** Estabilização e upgrade de reverse shells para sessões interativas completas (TTY sanitizado com `python pty` + `stty`).
+
+---
+
+### 🔌 [OWASP API Security Top 10](./OWASP%20API%20Top%2010.md)
+Guia dedicado à segurança de APIs REST, GraphQL e microserviços:
+
+| Identificador | Vulnerabilidade | Foco de Exploração |
+|---------------|-----------------|--------------------|
+| **API1:2023** | **BOLA (Broken Object Level Authorization)** | Manipulação de IDs sequenciais/UUIDs em rotas, bodies e métodos HTTP |
+| **API2:2023** | **Broken Authentication** | Falhas em JWT (`alg: none`, secrets fracos, key confusion), falta de rate limit |
+| **API3:2023** | **BOPLA (Broken Object Property Level Authorization)** | Mass Assignment e exposição excessiva de dados sensíveis em responses |
+| **API4:2023** | **Unrestricted Resource Consumption** | DoS de API por ausência de paginação estrita, memory exhaustion, rate limit bypass |
+| **API5:2023** | **BFLA (Broken Function Level Authorization)** | Acesso horizontal e vertical a endpoints administrativos |
+| **API6:2023** | **Unrestricted Access to Sensitive Business Flows** | Automação e abuso de regras de negócio (compras, cupons, scrapers) |
+| **API7:2023** | **Server-Side Request Forgery (SSRF)** | Injeção em webhooks, exportadores de PDF e pivoting para o `docker.sock` |
+| **API8:2023** | **Security Misconfiguration** | Headers inseguros, CORS permissivo, endpoints legados e verbos não filtrados |
+| **API9:2023** | **Improper Inventory Management** | Shadow APIs, rotas antigas/beta desprotegidas (`/v1` vs `/v2`) |
+| **API10:2023** | **Unsafe Consumption of APIs** | Confiança cega em integrações terceiras sem higienização de payload |
 
 ---
 
 ### 💣 [Payloads - Web Hacking](./Payloads%20-%20Web%20Hacking.md)
-Coleção de payloads prontos para uso, incluindo:
+Arsenal tático estruturado para testes práticos, categorizado por contexto, tecnologia e blindagem de WAF:
 
-- **XSS** — Reflected, Stored, DOM-based
-- **SQL Injection** — Union-based, Blind, Error-based
-- **SSRF** — Bypass de filtros e pivoting interno
-- **Command Injection** — Linux/Windows
-- **Linux PrivEsc Payloads** — One-liners de escalação de privilégios
+- **SQL Injection:** Cheatsheets de MySQL, PostgreSQL, MSSQL e SQLite; payloads para extração cega, error-based e injeções de arquivo.
+- **XSS:** Vetores modernos contornando filtros comuns, polyglots e vetores sem tags `<script>` (event handlers inline).
+- **LFI / Path Traversal:** Payloads com URL encode, bypass de extensão nula, wrappers PHP (`php://filter/convert.base64-encode/resource=...`) e log poisoning.
+- **Command Injection:** Bypass de filtros de espaço em branco via `$IFS`, expansão de chaves `{cat,/etc/passwd}` e entrega em Base64.
+- **Reverse Shells:** One-liners validados em Bash, Python, PHP, Perl, Ruby, Netcat e Socat.
 
 ---
 
 ### 🛡️ [WAF Bypass](./WAF%20Bypass.md)
-Guia dedicado a contornar Web Application Firewalls — separado dos Payloads por volume e profundidade:
+Metodologia técnica de evasão contra Web Application Firewalls (*Cloudflare, AWS WAF, Akamai, Imperva, ModSecurity*):
 
-```
-Cloudflare  →  AWS WAF  →  Akamai  →  Imperva  →  ModSecurity
-```
-
-- **Mentalidade:** entender como o WAF interpreta vs. como a aplicação interpreta
-- **Técnicas:** encoding, fragmentação, case variation, HTTP smuggling
-- **Alvos:** Cloudflare, AWS WAF, Akamai Kona, Imperva/Incapsula, Sucuri, F5 BIG-IP ASM
+- **Modelos de Discrepância de Parsing:** Diferença de interpretação entre o proxy/WAF e o servidor de aplicação back-end.
+- **Técnicas de Evasão:** Múltiplos encodings (URL, Double URL, Unicode, Hex, HTML Entities), comentários SQL inline (`/*!50000SELECT*/`), variação de case e fragmentação de pacotes HTTP.
+- **HTTP Request Smuggling:** Desalinhamento entre cabeçalhos `Content-Length` e `Transfer-Encoding: chunked`.
 
 ---
 
 ### 🐧 [Linux Privilege Escalation](./Linux%20Privilege%20Escalation.md)
-Guia completo de escalação de privilégios em Linux:
+Trilha exaustiva de auditoria e escalação de privilégios de usuário comum para `root` em ambientes GNU/Linux:
 
-```
-SUID/GUID  →  Sudo Misconfigs  →  Cron Jobs  →  Writable Files
-Capabilities  →  NFS  →  PATH Hijacking  →  Kernel Exploits
-```
+- **Reconhecimento Interno:** Enumeração com scripts automatizados (`LinPEAS`, `pspy`) e checagens manuais essenciais.
+- **Vulnerabilidades de Permissão:** SUID/SGID abusáveis via [GTFOBins](https://gtfobins.github.io/), configurações incorretas em `/etc/sudoers`.
+- **Linux Capabilities:** Exploração de flags especiais (`cap_setuid`, `cap_dac_read_search`, `cap_net_admin`).
+- **Automações e Tarefas:** Cron jobs, timers do systemd, scripts graváveis em diretórios do sistema e PATH hijacking.
+- **Ambientes Containerizados:** Identificação de containers Docker, montagem indevida de sockets (`/var/run/docker.sock`) e técnicas de container escape.
 
 ---
 
-### ⌨️ [Comandos Linux para Hacking](./Kali%20linux%20%26%20Arch%20e%20minhas%20anota%C3%A7%C3%B5es%20basicas.md)
-Referência rápida cobrindo:
+### ⌨️ [Comandos Linux & Ambiente de Ataque](./Kali%20linux%20%26%20Arch%20e%20minhas%20anota%C3%A7%C3%B5es%20basicas.md)
+Dotfiles, configurações operacionais e comandos táticos para sistemas Arch Linux e Kali:
 
-| Categoria | Conteúdo |
-|-----------|----------|
-| Navegação | `pwd`, `ls`, `cd`, flags essenciais |
-| Manipulação | `chmod`, `chown`, `find`, `grep` |
-| Rede | `netstat`, `ss`, `curl`, `wget`, `ip` |
-| Processos | `ps aux`, `kill`, `htop` |
-| Permissões | Tabela octal, SUID/GUID, explicação detalhada |
-| **Penelope** | Handler de reverse shell avançado — guia completo |
+| Domínio | Comandos / Ferramental |
+|---------|------------------------|
+| **Navegação & Busca** | `find`, `grep`, `awk`, `sed`, `cut`, `sort -u` |
+| **Rede & Probing** | `ss -tulpn`, `ip a`, `curl -I`, `wget`, `tcpdump` |
+| **Handlers de Shell** | `nc -lvnp`, `Penelope`, `pwncat-cs` |
+| **Pivoting & Tunelamento** | SSH Local/Remote/Dynamic port forwarding, `chisel`, `socat` |
+| **Auditoria de Permissões** | Tabela octal, visualização de permissões e checagens de ACL |
 
 ---
 
 ### 🌐 [REDES](./REDES%20-.md)
-Fundamentos de redes aplicados à segurança:
+Fundamentos de redes aplicados a testes de intrusão e análise de tráfego:
 
-`Modelo OSI` • `TCP/IP` • `DNS` • `HTTP/HTTPS` • `ARP` • `Sub-redes`
+- **Camadas e Protocolos:** Modelo OSI vs. TCP/IP, Three-Way Handshake (`SYN`, `SYN-ACK`, `ACK`).
+- **Protocolos de Aplicação e Transporte:** DNS, HTTP/1.1 vs. HTTP/2, HTTPS/TLS, UDP, TCP.
+- **Resolução de Conflitos e Roteamento:** ARP Poisoning, CIDR, sub-redes e análise de headers com Wireshark/tcpdump.
+- **Mapa Mental:** Integração com o arquivo visual interativo [`REDES - GERAL.canvas`](./REDES%20-%20GERAL.canvas).
 
 ---
 
 ### 📅 [Plano de Estudos](./plano%20de%20Estudos.md)
-Trilha de estudos estruturada com as três plataformas principais:
+Trilha técnica contínua estruturada:
 
-| Plataforma | Foco |
-|------------|------|
-| **CWES (HTB Academy)** | Trilha de certificação — conteúdo estruturado |
-| **Hacking Club** | Nível avançado — máquinas e prática ofensiva |
-| **PortSwigger Academy** | Labs cirúrgicos por vulnerabilidade — teoria web de referência |
+- **HackTheBox & Academy:** Foco na certificação CWES (*Certified Web Exploitation Specialist*) e resolução de máquinas da comunidade.
+- **Hacking Club:** Resoluções práticas de CTFs e explorações com cenários realistas de infraestrutura e aplicações corporativas.
+- **PortSwigger Web Security Academy:** Laboratórios cirúrgicos para aprofundamento das falhas reportadas no OWASP Top 10.
 
 ---
 
-## 🛠️ Stack de Ferramentas
+## 🛠️ Stack & Arsenal de Ferramental
 
 <div align="center">
 
-| Categoria | Ferramentas |
-|-----------|-------------|
-| **Recon** | `subfinder` `httpx` `amass` `shodan` |
-| **Web** | `Burp Suite` `ffuf` `nuclei` `sqlmap` |
-| **Shells** | `Penelope` `netcat` `pwncat` |
-| **PrivEsc** | `LinPEAS` `LinEnum` `pspy` |
-| **OSINT** | `theHarvester` `maltego` `recon-ng` |
-| **Platform** | `Kali Linux` `Arch + BlackArch` |
+| Categoria | Ferramental Homologado |
+|-----------|------------------------|
+| **Reconhecimento & OSINT** | `subfinder` `httpx` `amass` `shodan` `theHarvester` `crt.sh` |
+| **Crawling & Content Discovery** | `katana` `gau` `ffuf` `gobuster` `dirsearch` |
+| **Web & API Assessment** | `Burp Suite Professional` `nuclei` `sqlmap` `kxss` `SecretFinder` |
+| **Listeners & Shell Handlers** | `Penelope` `pwncat-cs` `netcat` `rlwrap` |
+| **Escalação de Privilégios** | `LinPEAS` `pspy` `GTFOBins` |
+| **Sistemas Operacionais** | `Arch Linux` • `Kali Linux` |
 
 </div>
 
 ---
 
-## 📊 Plataformas de Bug Bounty
+## 🏆 Writeups Documentados
 
-<div align="center">
+Writeups completos com cadeia de ataque, PoCs e mitigação disponíveis no repositório irmão [GabrielMarques1/WriteUps](https://github.com/GabrielMarques1/WriteUps) e no site oficial:
 
-[![HackerOne](https://img.shields.io/badge/HackerOne-494649?style=for-the-badge&logo=hackerone&logoColor=white)](https://www.hackerone.com/)
-[![Bugcrowd](https://img.shields.io/badge/Bugcrowd-F26822?style=for-the-badge&logo=bugcrowd&logoColor=white)](https://www.bugcrowd.com/)
-[![Intigriti](https://img.shields.io/badge/Intigriti-1A1A2E?style=for-the-badge&logo=intigriti&logoColor=white)](https://www.intigriti.com/)
-[![BugHunt](https://img.shields.io/badge/BugHunt%20🇧🇷-00C853?style=for-the-badge)](https://bughunt.com.br/)
-
-</div>
-
----
-
-## 🏆 Writeups
-
-| Máquina/Desafio | Plataforma | Dificuldade | Link |
-|-----------------|------------|-------------|------|
-| Laravel-Time | — | Médio | [Writeup](./Writeup%20%E2%80%94%20M%C3%A1quina%20Laravel-Time.md) |
+| Máquina / Alvo | Plataforma | Dificuldade | Vetores Principais | Status |
+|----------------|------------|:-----------:|---------------------|:------:|
+| **Cyber-News** | Hacking Club | Difícil | BOPLA, Mass Assignment, BOLA, WebDAV RCE, Docker Escape | 🟢 Rooted |
+| **Retro** | Hacking Club | Médio | OTP Bypass, IDOR, Command Injection, ROM Hijacking | 🟢 Rooted |
+| **Poisoning** | Hacking Club | Médio | LFI, Log Poisoning, RCE, `cap_setuid` PrivEsc | 🟢 Rooted |
+| **Lion** | Hacking Club | Médio | SQLi UNION-based, WebShell via `INTO OUTFILE`, Crontab | 🟢 Rooted |
+| **Calc** | Hacking Club | Médio | Command Injection (PHP `eval`), Python Library Hijacking | 🟢 Rooted |
+| **Laravel-Time** | Hacking Club | Médio | Time-Based Blind SQLi, `LOAD_FILE`, SMB, Crontab | 🟢 Rooted |
 
 ---
 
-## ⚙️ Como usar este repositório
+## ⚙️ Como Utilizar Este Repositório
 
-Este repositório foi construído para ser aberto no **[Obsidian](https://obsidian.md/)** — os links entre notas, canvas e callouts funcionam nativamente nele.
+O repositório foi arquitetado para navegação via **[Obsidian](https://obsidian.md/)**, preservando links bidirecionais (`[[...]]`), tags e diagramas Canvas:
 
 ```bash
 # Clonar o repositório
 git clone https://github.com/GabrielMarques1/Cyber-security.git
 
-# Abrir no Obsidian
-# File → Open Vault → selecionar a pasta clonada
+# Abrir no Obsidian:
+# File -> Open Vault -> Selecionar a pasta ~/Cyber-security/
 ```
 
-> Também pode ser lido diretamente aqui no GitHub — todo o conteúdo está em Markdown padrão.
+> **Acesso Web:** Todo este vault é sincronizado automaticamente e publicado em formato de artigos e cheatsheets no portfólio oficial: **[https://www.gabrielsec.live/notes](https://www.gabrielsec.live/notes)**.
 
 ---
 
-## 📌 Referências de Estudo
+## 📌 Referências & Recursos Oficiais
 
-- 🎓 [Hacking Club](https://app.hackingclub.com/) — Plataforma de treinamento ofensivo BR
-- 🎓 [HackTheBox](https://academy.hackthebox.com/app/dashboard/) — Plataforma de treinamento ofensivo 
-- 📖 [OWASP WSTG](https://owasp.org/www-project-web-security-testing-guide/) — Guia de testes de segurança web
-- 🔧 [Penelope Shell Handler](https://github.com/brightio/penelope) — Handler avançado de reverse shells
-- 📡 [NotebookLM](https://notebooklm.google.com/) — IA para estudo e resumo de conteúdos
+- 📖 [OWASP Web Security Testing Guide (WSTG)](https://owasp.org/www-project-web-security-testing-guide/)
+- 🔌 [OWASP API Security Top 10](https://owasp.org/www-project-api-security/)
+- 🎯 [MITRE ATT&CK Framework](https://attack.mitre.org/)
+- 📜 [PTES — Penetration Testing Execution Standard](http://www.pentest-standard.org/)
+- 🎓 [PortSwigger Web Security Academy](https://portswigger.net/web-security)
+- 🎓 [Hack The Box Academy](https://academy.hackthebox.com/)
+- 🎓 [Hacking Club](https://app.hackingclub.com/)
 
 ---
 
 <div align="center">
 
-**Feito com 🖤 e muita curiosidade**
-
-*"Hack the planet — de forma ética e autorizada."*
+**Gabriel (edimargabriel)**  
+*Segurança Ofensiva Ética • Pentest • CTF*  
+🌐 [gabrielsec.live](https://www.gabrielsec.live) • 💼 [LinkedIn](https://linkedin.com/in/edimargabriel) • 🐙 [GitHub](https://github.com/GabrielMarques1)
 
 </div>
