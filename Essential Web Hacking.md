@@ -638,20 +638,6 @@ O protocolo Redis (RESP) é baseado em texto plano e aceita comandos diretos sep
 ##### 3. SSRF contra FastCGI (Porta 9000)
 Se houver um interpretador `php-fpm` escutando localmente na porta 9000 sem passar pelo Nginx/Apache, o empacotamento de registros FastCGI via Gopher permite invocar scripts PHP locais passando variáveis `PHP_VALUE` e `PHP_ADMIN_VALUE` arbitrárias, alcançando RCE via `auto_prepend_file = php://input`.
 
----
-
-#### 📈 Análise de Cenários de Desafio (Contexto "Stonks")
-
-Em ambientes CTF e aplicações financeiras/fintech (como o desafio **Stonks** do Hacking Club), o SSRF costuma surgir em funcionalidades de:
-- Consulta ou pré-visualização de cotações em APIs parceiras externas.
-- Webhooks de alerta de variação de ativos.
-- Download de relatórios ou balanços em PDF.
-
-**Padrão de Falha Típico:**
-1. O backend recebe uma URL externa legítima (ex: `api.exchange.com/quotes/ticker`).
-2. Uma verificação superficial é aplicada (ex: checar se a URL contém `exchange.com`).
-3. O atacante quebra a validação com URL Parsing Tricks (ex: `http://exchange.com@127.0.0.1:8080/flag` ou subdomínios maliciosos).
-4. O servidor consulta uma rota administrativa interna onde o painel financeiro ou a flag reside sem autenticação.
 
 ---
 
@@ -719,30 +705,6 @@ Sistemas que convertem páginas web ou relatórios HTML em arquivos PDF (usando 
   ```
   O PDF gerado conterá a captura gráfica ou o texto completo dos metadados da nuvem ou do painel local.
 
----
-
-#### 🛡️ Mitigações Arquiteturais e Defesa em Profundidade
-
-Para a elaboração de laudos técnicos e recomendações profissionais (OWASP / PTES):
-
-1. **Validação Pré-Socket (Evita DNS Rebinding e Bypasses de Parser):**
-   - O backend nunca deve confiar cegamente no hostname da URL.
-   - Resolver o DNS em nível de código antes da requisição.
-   - Verificar se o IP resultante pertence a faixas privadas (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`, `::1`).
-   - Efetuar a conexão do socket diretamente ao IP validado, mantendo o Host header original.
-2. **Restrição Estrita de Protocolos:**
-   - Desabilitar suporte a esquemas não-HTTP na biblioteca cliente (`gopher://`, `file://`, `dict://`, `ftp://`).
-   - Exemplo em PHP cURL:
-     ```php
-     curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
-     curl_setopt($ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
-     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false); // Bloqueia Open Redirect Chaining
-     ```
-3. **Isolamento de Rede e Egress Filtering:**
-   - Implementar firewall de saída na máquina de aplicação bloqueando conexões para a rede interna e para `169.254.169.254`.
-   - Na AWS, aplicar obrigatoriedade de **IMDSv2** com contagem de hops de rede (`hop_limit = 1`).
-
----
 
 ---
 
