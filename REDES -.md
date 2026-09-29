@@ -342,3 +342,10 @@ RESPONSE-BODY
 | **Referer** | De onde veio a requisição | `Referer: https://google.com` |
 
 > **Em hacking:** Headers como `X-Forwarded-For: 127.0.0.1` podem ser manipulados para bypass de restrição de IP. O `User-Agent` pode ser usado para Log Poisoning (LFI → RCE).
+
+---
+
+## 🛠️ Diagnóstico e Troubleshooting Prático no Linux
+
+Para procedimentos operacionais no Arch Linux cobrindo auditoria manual de processos órfãos (`PPID 1`), inspeção de interfaces virtuais `tun`, análise de sockets com `ss`, tabelas de rotas e estabilização de túneis VPN (OpenVPN/Pritunl) com ajustes de MTU (`mssfix 1360`) e keepalive (`ping-restart`):
+👉 [[Kali linux & Arch e minhas anotações basicas#Troubleshooting de Redes, Processos e VPN (OpenVPN/Pritunl)|Troubleshooting de Redes, Processos e VPN (OpenVPN/Pritunl)]]

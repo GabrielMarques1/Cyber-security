@@ -298,3 +298,176 @@ curl -X POST "https://alvo.com/upload" \
 ```
 
 > **Relacionado:** [[Process of Hacking]] (Reconhecimento) • [[OWASP API Top 10]] (Testes de endpoints de API) • [[Linux Privilege Escalation]] (Transferência de enum scripts)
+
+---
+
+## Troubleshooting de Redes, Processos e VPN (OpenVPN/Pritunl)
+
+> Referência teórica de protocolos, camadas e roteamento: [[REDES -]]
+> Guia operacional para auditoria manual de processos, interfaces virtuais `tun`, tabelas de rotas e estabilização de túneis VPN (OpenVPN / Pritunl Client) no Arch Linux.
+
+### Tabela Comparativa de Ferramentas de Diagnóstico
+
+| Ferramenta / Comando | Camada / Escopo | Finalidade Principal | Exemplo Operacional |
+|---|---|---|---|
+| `pgrep` / `ps` | Processos / SO | Identificar PIDs ativos, inspecionar linha de comando e detectar processos órfãos em background | `pgrep -a openvpn` |
+| `ip a` / `ip link` | Camada 2 / 3 | Auditar status (`UP`/`DOWN`), flags, MTU e estatísticas de pacotes/erros em interfaces físicas e `tun` | `ip -s link show dev tun0` |
+| `ip route` | Camada 3 (Rede) | Inspecionar gateway padrão, métricas de rota e rotas injetadas via VPN (prevenção de routing leak) | `ip route show table main` |
+| `ss` | Camada 4 (Transporte) | Auditar sockets abertos, buffers de transmissão (`Send-Q`/`Recv-Q`) e mapear portas UDP/TCP a PIDs | `ss -uap` |
+| `openvpn --verb` | Aplicação / Túnel | Nível de log em tempo real para depuração de handshake TLS, keepalive e negociação de cifras | `openvpn --config lab.ovpn --verb 4` |
+
+---
+
+### 1. Auditoria e Rastreio de Processos (OpenVPN & Pritunl)
+
+Instâncias do OpenVPN ou do serviço em background do Pritunl (`pritunl-client` / `pritunl-client-service`) podem travar silenciosamente, retendo sockets abertos e a interface virtual `tun`.
+
+```bash
+# Localizar todos os processos do OpenVPN exibindo a linha de comando completa com argumentos (-a)
+pgrep -a openvpn
+
+# Listar processos em hierarquia de árvore (--forest), exibindo PID, PPID, usuário e comando
+ps -eo pid,ppid,user,stat,comm,args --forest | grep -E "openvpn|pritunl"
+
+# Encerrar graciosamente processo travado pelo PID (SIGTERM - 15)
+kill -15 <PID>
+
+# Forçar encerramento imediato caso o processo ignore o SIGTERM (SIGKILL - 9)
+kill -9 <PID>
+```
+
+> [!WARNING]
+> **Detecção de Processos Órfãos (`PPID 1`):**
+> Quando o processo pai (uma janela de terminal encerrada incorretamente, um script wrapper ou a interface GUI do Pritunl) morre sem fechar a sessão da VPN, o processo do OpenVPN é adotado pelo `init`/`systemd` (`PPID 1`).
+> Esse processo órfão permanece em execução oculta, mantendo a interface `tun0` alocada e retendo as rotas de rede no kernel. Ao tentar reconectar, ocorrem erros de dispositivo ocupado (`TUN/TAP device tun0 already exists`) ou portas UDP travadas.
+> Para auditar e isolar processos órfãos da VPN:
+> ```bash
+> ps -ef | awk '$3 == 1 && /openvpn|pritunl/ {print "PID:", $2, "| PPID:", $3, "| CMD:", $8, $9}'
+> ```
+
+---
+
+### 2. Inspeção de Interfaces de Rede e Estatísticas (`iproute2`)
+
+A interface de túnel (`tun0`, `tun1` ou `pritunl...`) é criada no kernel através do driver virtual universal `tun`.
+
+```bash
+# Listar todas as interfaces com endereçamento IPv4/IPv6 de forma concisa e resumida (-br)
+ip -br a
+
+# Inspecionar detalhes da interface virtual tun0 (status UP/DOWN, MTU e escopo)
+ip a show dev tun0
+
+# Exibir estatísticas detalhadas (-s: contadores de bytes, pacotes transmitidos, erros RX/TX e drops)
+ip -s link show dev tun0
+
+# Derrubar e remover manualmente interface tun residual deixada por processo finalizado incorretamente
+sudo ip link set dev tun0 down
+sudo ip link delete dev tun0
+```
+
+> [!NOTE]
+> No Arch Linux, o módulo `tun` deve estar presente no kernel. Se a criação da interface falhar com o erro `Cannot open TUN/TAP dev /dev/net/tun: No such file or directory`, carregue o módulo manualmente:
+> ```bash
+> lsmod | grep tun || sudo modprobe tun
+> ```
+
+---
+
+### 3. Diagnóstico de Rotas e Prevenção de Routing Leak
+
+Ao estabelecer o túnel, o OpenVPN aplica rotas para direcionar o tráfego do laboratório para o gateway da VPN. Caso as métricas ou sub-redes estejam incorretas, os pacotes podem vazar pela interface física local ou interromper o acesso à rede do alvo.
+
+```bash
+# Exibir a tabela de rotas padrão do sistema
+ip route show
+
+# Identificar exatamente por qual interface e gateway um IP de destino (ex: máquina do HTB/CTF) será alcançado
+ip route get 10.10.10.10
+
+# Adicionar manualmente rota estática para a sub-rede do laboratório apontando para a interface tun0
+sudo ip route add 10.10.10.0/24 dev tun0
+
+# Deletar rota conflitante que esteja roteando tráfego do laboratório para o gateway local (ex: wlan0)
+sudo ip route del 10.10.10.0/24 dev wlan0
+```
+
+---
+
+### 4. Análise de Sockets e Portas com `ss`
+
+O OpenVPN utiliza primariamente datagramas UDP (portas 1194, 1195 ou portas dinâmicas no Pritunl). O `ss` inspeciona as estruturas de socket diretamente via `netlink`.
+
+```bash
+# Listar sockets UDP (-u), exibindo conexões ativas e ouvintes (-a) com o PID/nome do processo (-p)
+# Requer sudo para visualizar o PID de daemons e processos que não pertencem ao usuário atual
+sudo ss -uap
+
+# Filtrar sockets especificando a porta de comunicação do túnel VPN (ex: porta 1194)
+sudo ss -uap '( sport = :1194 or dport = :1194 )'
+
+# Visualizar buffers de recebimento (Recv-Q) e envio (Send-Q) em sockets UDP numéricos (-n)
+sudo ss -unap
+```
+
+> [!NOTE]
+> Filas persistentemente preenchidas em `Recv-Q` (pacotes recebidos do túnel aguardando leitura pela aplicação) ou `Send-Q` (pacotes criptografados aguardando envio pelo socket) indicam saturação de banda, oscilação severa de rota ou gargalo de processamento da cifra criptográfica na CPU.
+
+---
+
+### 5. Estabilidade de Conexão, MTU e Keepalive
+
+Em redes Wi-Fi domésticas, conexões com perda de pacotes ou ISPs sob CGNAT, túneis UDP sofrem quedas periódicas ou travam transferências extensas.
+
+```bash
+# Executar o OpenVPN em foreground com verbosidade elevada (--verb 4 exibe eventos de pacote e keepalive)
+sudo openvpn --config /caminho/lab.ovpn --verb 4
+
+# Testar o Path MTU até o gateway da VPN sem fragmentar (-M do: ativa DF bit; -s: tamanho do payload ICMP)
+ping -M do -s 1472 10.10.14.1
+```
+
+> [!WARNING]
+> **Quedas por Timeout de Keepalive (`ping-restart 60`):**
+> Em conexões Wi-Fi com oscilação ou perda temporária de datagramas UDP, as mensagens de keepalive do OpenVPN podem ser descartadas.
+> A diretiva padrão do OpenVPN `keepalive 10 60` envia um pacote ping a cada 10 segundos e, se 60 segundos se passarem sem resposta do servidor remoto, a conexão é declarada morta (`[soft,ping-restart]`), disparando:
+> `Inactivity timeout (--ping-restart), restarting`.
+> Para estabilizar conexões instáveis, adicione ou substitua no arquivo `.ovpn`:
+> ```text
+> keepalive 10 120
+> ping-restart 120
+> ```
+
+> [!TIP]
+> **Ajustes de Estabilização de MTU (`mssfix 1360`):**
+> O MTU padrão da rede física é 1500 bytes. O encapsulamento do túnel adiciona overhead significativo: cabeçalho IP (20 bytes) + UDP (8 bytes) + cabeçalho OpenVPN + vetor de inicialização (IV) e HMAC de integridade.
+> Pacotes que atingem 1500 bytes no túnel ultrapassam o MTU físico externo, provocando fragmentação IP ou descarte silencioso em roteadores intermediários (MTU Black Hole).
+> **Sintoma típico:** O `ping` funciona normalmente, mas conexões SSH, varreduras do `nmap` ou requisições HTTP via `curl` congelam sem retornar dados.
+> Para solucionar, force o ajuste do Maximum Segment Size do TCP no arquivo `.ovpn`:
+> ```text
+> tun-mtu 1500
+> mssfix 1360
+> ```
+> O `mssfix 1360` instrui o OpenVPN a interceptar e reescrever o MSS dos pacotes TCP que passam pelo túnel para no máximo 1360 bytes, assegurando que o pacote final encapsulado nunca exceda o limite de 1500 bytes da interface física.
+
+---
+
+### 6. Procedimento de Recuperação Rápida no Arch Linux
+
+Quando a VPN do HTB, Hacking Club ou Pritunl travar ou apresentar falha de conexão:
+
+```bash
+# 1. Encerrar imediatamente instâncias órfãs ou duplicadas do OpenVPN e Pritunl
+sudo killall -9 openvpn pritunl-client 2>/dev/null
+
+# 2. Deletar interfaces tun presas no kernel
+sudo ip link delete dev tun0 2>/dev/null
+
+# 3. Validar se o daemon de DNS (systemd-resolved) não reteve servidores inacessíveis
+resolvectl status 2>/dev/null || cat /etc/resolv.conf
+
+# 4. Iniciar conexão aplicando estabilização de MSS e verbosidade controlada
+sudo openvpn --config lab.ovpn --mssfix 1360 --verb 3
+```
+
+> **Links Bidirecionais:** [[REDES -]] (Conceitos teóricos de TCP, UDP, Camadas OSI e Roteamento) • [[Kali linux & Arch e minhas anotações basicas]]
