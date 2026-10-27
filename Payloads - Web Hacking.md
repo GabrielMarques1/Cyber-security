@@ -1527,6 +1527,7 @@ sqlmap -u "http://ALVO.COM/page?id=1" -D BANCO -T TABELA -C user,password --dump
 > **O que é WAF:** Um Web Application Firewall é uma camada de segurança que filtra, monitora e bloqueia requisições HTTP maliciosas antes que elas cheguem à aplicação. WAFs podem ser baseados em **regex** (padrões de texto), **assinatura** (payloads conhecidos), **heurística** (comportamento anômalo) ou **machine learning**.
 
 > **Por que aprender WAF Bypass:** Em ambientes reais e em CTFs avançados, você vai encontrar WAFs como **ModSecurity**, **Cloudflare**, **AWS WAF**, **Akamai**, **Imperva**, **Sucuri**, **Fortinet FortiWeb** entre outros. Saber contorná-los é essencial para pentesting.
+> **Relacionado:** [[WAF Bypass]] • [[Essential Web Hacking]]
 
 ---
 
@@ -2792,7 +2793,7 @@ allow if user($u), role($r), $r == "admin";
 
 # 🔌 OWASP API Security Top 10 — Payloads & Técnicas
 
-> Relacionado: [[Essential Web Hacking#OWASP API Security Top 10 — 2023]]
+> Relacionado: [[OWASP API Top 10]] • [[Essential Web Hacking]]
 
 ---
 
